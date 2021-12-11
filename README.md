@@ -32,8 +32,8 @@
                 "command": "echo done",
                 "dependsOrder": "sequence",
                 "dependsOn": [
-                    "Compile",
-                    "Execute"
+                    "Compile PCE",
+                    "Execute PCE"
                 ]
             }
         ]
@@ -49,3 +49,8 @@
         ~~~
         $Ootake.exe XXX.pce
         ~~~
+    - 初期設定のキー配置
+        - 方向 = Arrow Key
+        - II, I = Space, N
+        - セレクト, スタート = Tab, Enter
+    
