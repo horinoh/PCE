@@ -4,6 +4,15 @@
 #define SCREEN_WIDTH 256
 #define SCREEN_HEIGHT 224
 
+/* Window */
+#define WIN0 0
+#define WIN1 1
+#define WIN2 2
+#define WIN3 3
+
+#define SCR_SPR_ON (1 << 6)
+#define SCR_BG_ON (1 << 7)
+
 /* Palette */
 #define PALETTE_BG00 0
 #define PALETTE_BG01 1
@@ -59,6 +68,10 @@
 #define JOY_PAD2 2
 #define JOY_PAD3 3
 #define JOY_PAD4 4
+#define JOY_PAD0_MAS (1 << JOY_PAD0)
+#define JOY_PAD1_MAS (1 << JOY_PAD1)
+#define JOY_PAD2_MAS (1 << JOY_PAD2)
+#define JOY_PAD3_MAS (1 << JOY_PAD3)
 
 /* typedef */
 #define u8 char

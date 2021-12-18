@@ -7,6 +7,14 @@ onStartPressed()
   static u8 StartCount;
   put_string("START", 10, StartCount);
   StartCount = ++StartCount % (SCREEN_HEIGHT / 8);
+
+  /*
+  do {
+		vsync();
+	} while (!(joytrg(JOY_PAD0) & JOY_STRT));
+
+  clear_joy_events(JOY_PAD0_MAS);
+  */
  }
 
 main()
@@ -16,7 +24,7 @@ main()
   u16 x, y;
   x = 0; y = 1;
   
-  set_joy_callback(0, (1 << JOY_PAD0), JOY_STRT, onStartPressed);
+  set_joy_callback(0, JOY_PAD0_MAS, JOY_STRT, onStartPressed);
 
   while(1){
     vsync();
@@ -27,6 +35,13 @@ main()
     KeyTrig = joytrg(JOY_PAD0);
     
     put_number(KeyState, 3, 0, 0);
+
+    put_string("DEFAULT KEY MAPPING", 0, SCREEN_HEIGHT / 8 - 7); 
+    put_string("URDL : Arrow ", 0, SCREEN_HEIGHT / 8 - 5); 
+    put_string("SEL  : Tab", 0, SCREEN_HEIGHT / 8 - 4);
+    put_string("RUN  : Enter", 0, SCREEN_HEIGHT / 8 - 3);
+    put_string("II   : Space", 0, SCREEN_HEIGHT / 8 - 2);
+    put_string("I    : N", 0, SCREEN_HEIGHT / 8 - 1);
 
     /* Up, Right, Down, Left : Arrow key */
     (KeyState & JOY_UP) ? put_char('+', 1 + x, 0 + y) : put_char('-', 1 + x, 0 + y);

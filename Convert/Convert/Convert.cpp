@@ -9,8 +9,8 @@
 #pragma warning(pop)
 
 #include <vector>
-//#include <ranges>
 #include <fstream>
+#include <string_view>
 
 #ifdef _DEBUG
 #pragma comment(lib, "opencv_world454d.lib")
@@ -18,17 +18,206 @@
 #pragma comment(lib, "opencv_world454.lib")
 #endif
 
+class IndexColorBase
+{
+public:
+	IndexColorBase(const cv::Mat& Img) : Image(Img) {}
+
+	virtual IndexColorBase& CreatePalette() { return *this; }
+	virtual IndexColorBase& CreateIndexColor() { return *this; }
+	virtual IndexColorBase& OutputPalette([[maybe_unused]] std::string_view Path) { return *this; }
+	virtual IndexColorBase& OutputIndexColor([[maybe_unused]] std::string_view Path) { return *this; }
+	virtual IndexColorBase& Restore() { return *this; }
+
+protected:
+	const cv::Mat& Image;
+};
+class IndexColorImage : public IndexColorBase
+{
+private:
+	using Super = IndexColorBase;
+public:	
+	IndexColorImage(const cv::Mat& Img) : Super(Img) {}
+	virtual IndexColorBase& CreatePalette() override {
+		Palettes.clear();
+		for (auto i = 0; i < Image.rows; ++i) {
+			for (auto j = 0; j < Image.cols; ++j) {
+				const auto Color = Image.ptr<cv::Vec3b>(i)[j];
+				if (end(Palettes) == std::find(begin(Palettes), end(Palettes), Color)) {
+					Palettes.emplace_back(Color);
+				}
+			}
+		}
+		return *this;
+	}
+	virtual IndexColorBase& CreateIndexColor() override {
+		IndexColors.clear();
+		for (auto i = 0; i < Image.rows; ++i) {
+			for (auto j = 0; j < Image.cols; ++j) {
+				const auto Color = Image.ptr<cv::Vec3b>(i)[j];
+				const auto It = std::find(begin(Palettes), end(Palettes), Color);
+				if (end(Palettes) != It) {
+					IndexColors.emplace_back(static_cast<uint32_t>(std::distance(begin(Palettes), It)));
+				}
+			}
+		}
+		return *this;
+	}
+	//!< インデックスカラーから復元して表示してみる (チェック用)
+	virtual IndexColorBase& Restore() override {
+		cv::Mat RestoreImage(Image.size(), Image.type());
+		int k = 0;
+		for (auto i = 0; i < Image.rows; ++i) {
+			for (auto j = 0; j < Image.cols; ++j) {
+				RestoreImage.ptr<cv::Vec3b>(i)[j] = Palettes[IndexColors[k++]];
+			}
+		}
+		//!< 大きくして表示
+		cv::resize(RestoreImage, RestoreImage, cv::Size(512, 512), 0, 0, cv::INTER_NEAREST);
+		cv::imshow("Restore", RestoreImage);
+		cv::waitKey(0);
+		return *this;
+	}
+protected:
+	std::vector<cv::Vec3b> Palettes;
+	std::vector<uint32_t> IndexColors;
+};
+
+class IndexColorImagePCE : public IndexColorBase
+{
+private:
+	using Super = IndexColorBase;
+public:
+	IndexColorImagePCE(const cv::Mat& Img) : Super(Img) {}
+	//!< 0000 000G GGRR RBBB
+	static uint16_t ToPCEColor(const cv::Vec3b& Color) { return ((Color[1] * 7 / 255) << 6) | ((Color[2] * 7 / 255) << 3) | (Color[0] * 7 / 255); }
+	//!< Vec3b(B, G, R)
+	static cv::Vec3b FromPCEColor(const uint16_t& Color) { return cv::Vec3b((Color & 0x7) * 255 / 7, ((Color & (0x7 << 6)) >> 6) * 255 / 7, ((Color & (0x7 << 3)) >> 3) * 255 / 7); }
+	//!< 24bitカラー -> 9bitカラー へ丸められる為、近い色だと同じ色になってしまう場合があり、想定よりもエントリが少なくなる可能性がある
+	virtual IndexColorBase& CreatePalette() override {
+		Palettes.clear();
+		Palettes.emplace_back(0);
+		for (auto i = 0; i < Image.rows; ++i) {
+			for (auto j = 0; j < Image.cols; ++j) {
+				const auto Color = ToPCEColor(Image.ptr<cv::Vec3b>(i)[j]);
+				if (end(Palettes) == std::find(begin(Palettes), end(Palettes), Color)) {
+					Palettes.emplace_back(Color);
+				}
+			}
+		}
+		std::cout << "Palette Count = " << size(Palettes) << std::endl;
+		while (size(Palettes) < 16) { Palettes.emplace_back(0); }
+		return *this;
+	}
+	virtual IndexColorBase& CreateIndexColor() override {
+		IndexColors.clear();
+		for (auto i = 0; i < Image.rows; ++i) {
+			for (auto j = 0; j < Image.cols; ++j) {
+				const auto Color = ToPCEColor(Image.ptr<cv::Vec3b>(i)[j]);
+				const auto It = std::find(begin(Palettes), end(Palettes), Color);
+				if (end(Palettes) != It) {
+					IndexColors.emplace_back(static_cast<uint32_t>(std::distance(begin(Palettes), It)));
+				}
+			}
+		}
+		return *this;
+	}
+	virtual IndexColorBase& OutputPalette(std::string_view Path) override {
+		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+		if (!Out.bad()) {
+			Out.write(reinterpret_cast<const char*>(data(Palettes)), size(Palettes) * sizeof(Palettes[0]));
+			Out.close();
+		}
+		return *this;
+	}
+	virtual IndexColorBase& OutputIndexColor(std::string_view Path) override {
+		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+		if (!Out.bad()) {
+			Out.close();
+		}
+		return *this;
+	}
+	virtual IndexColorBase& Restore() override {
+		cv::Mat RestoreImage(Image.size(), Image.type());
+		int k = 0;
+		for (auto i = 0; i < Image.rows; ++i) {
+			for (auto j = 0; j < Image.cols; ++j) {
+				RestoreImage.ptr<cv::Vec3b>(i)[j] = FromPCEColor(Palettes[IndexColors[k++]]);
+			}
+		}
+		cv::resize(RestoreImage, RestoreImage, cv::Size(512, 512), 0, 0, cv::INTER_NEAREST);
+		cv::imshow("Restore PCE", RestoreImage);
+		cv::waitKey(0);
+		return *this;
+	}
+protected:
+	std::vector<uint16_t> Palettes;
+	std::vector<uint16_t> IndexColors;
+};
+
+
+//!< スプライトのサイズ : SZ_16x16, SZ_16x32, SZ_16x64, SZ_32x16, SZ_32x32, SZ_32x64
+class IndexColorImagePCESprite : public IndexColorImagePCE
+{
+private:
+	using Super = IndexColorImagePCE;
+public:
+	IndexColorImagePCESprite(const cv::Mat& Img) : Super(Img) {}
+	virtual IndexColorBase& CreateIndexColor() override {
+		Super::CreateIndexColor();
+		
+		Plane0.clear();
+		Plane1.clear();
+		Plane2.clear();
+		Plane3.clear();
+		for (auto i = 0; i < size(IndexColors) / 16; ++i) {
+			Plane0.emplace_back(0);
+			Plane1.emplace_back(0);
+			Plane2.emplace_back(0);
+			Plane3.emplace_back(0);
+			for (auto j = 0; j < 16; ++j) {
+				const auto Index = IndexColors[i * 16 + j];
+				const auto Shift = 15 - j;
+				Plane0.back() |= (Index & 1) << Shift;
+				Plane1.back() |= (Index & 2) << Shift;
+				Plane2.back() |= (Index & 4) << Shift;
+				Plane3.back() |= (Index & 8) << Shift;
+			}
+		}
+		return *this;
+	}
+	virtual IndexColorBase& OutputIndexColor(std::string_view Path) override {
+		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+		if (!Out.bad()) {
+			Out.write(reinterpret_cast<const char*>(data(Plane0)), size(Plane0) * sizeof(Plane0[0]));
+			Out.write(reinterpret_cast<const char*>(data(Plane1)), size(Plane1) * sizeof(Plane1[0]));
+			Out.write(reinterpret_cast<const char*>(data(Plane2)), size(Plane2) * sizeof(Plane2[0]));
+			Out.write(reinterpret_cast<const char*>(data(Plane3)), size(Plane3) * sizeof(Plane3[0]));
+			Out.close();
+		}
+		return *this; 
+	}
+	
+protected:
+	std::vector<uint16_t> Plane0;
+	std::vector<uint16_t> Plane1;
+	std::vector<uint16_t> Plane2;
+	std::vector<uint16_t> Plane3;
+};
+
 int main(int argc, char *argv[])
 {
-	//auto Image = cv::imread("kueken7_rgb8.jpg");
+	auto Image = cv::imread("mychara.png");
+	{
+		//if (1 < argc) {
+			//auto Image = cv::imread(argv[1]);
 
-	if (1 < argc) {
-		auto Image = cv::imread(argv[1]);
+		cv::imshow("Original", Image);
+		cv::waitKey(0);
 
+#if true
 		//!< リサイズ
-		{
-			cv::resize(Image, Image, cv::Size(256, 256));
-		}
+		cv::resize(Image, Image, cv::Size(16, 16), 0, 0, cv::INTER_NEAREST);
 
 		//!< 減色
 		{
@@ -57,94 +246,19 @@ int main(int argc, char *argv[])
 
 			Image = Tmp.clone();
 		}
+#endif
 
-		//!< パレット
-		std::vector<cv::Vec3b> Palette;
-		for (auto i = 0; i < Image.rows; ++i) {
-			for (auto j = 0; j < Image.cols; ++j) {
-				const auto Color = Image.ptr<cv::Vec3b>(j)[i];
-				if (end(Palette) == std::find(begin(Palette), end(Palette), Color)) {
-					Palette.emplace_back(Color);
-				}
-			}
-		}
-		//!< PCEパレット (GGGRRRBBB)
-		//!< 24bitカラー -> 9bitカラー へ丸められる為、近い色が同じになる場合があり、エントリが想定よりも少なくなる可能性がある
-		std::vector<uint16_t> PCEPalette;
-		for (auto i : Palette) {
-			const auto Color = ((i[1] * 7 / 255) << 6) | ((i[2] * 7 / 255) << 3) | (i[0] * 7 / 255);
-			if (end(PCEPalette) == std::find(begin(PCEPalette), end(PCEPalette), Color)) {
-				PCEPalette.emplace_back(Color);
-			}
-		}
-		//!< PCEパレットの出力
-		{
-			std::ofstream Out("PCEPalette.bin", std::ios::binary | std::ios::out);
-			if (!Out.bad()) {
-				Out.write(reinterpret_cast<const char*>(data(PCEPalette)), size(PCEPalette) * sizeof(PCEPalette[0]));
-				Out.close();
-			}
-		}
+		//!< パレットとインデックスカラー画像
+		IndexColorImage ICI(Image);
+		ICI.CreatePalette().CreateIndexColor().Restore();
 
-		//!< インデックスカラー画像
-		std::vector<uint32_t> IndexColorImage;
-		for (auto i = 0; i < Image.rows; ++i) {
-			for (auto j = 0; j < Image.cols; ++j) {
-				const auto Color = Image.ptr<cv::Vec3b>(j)[i];
-				const auto It = std::find(begin(Palette), end(Palette), Color);
-				if (end(Palette) != It) {
-					IndexColorImage.emplace_back(static_cast<uint32_t>(std::distance(begin(Palette), It)));
-				}
-			}
-		}
-		//!< PCEプレーン	 
-		std::vector<uint16_t> PCEPlane0;
-		std::vector<uint16_t> PCEPlane1;
-		std::vector<uint16_t> PCEPlane2;
-		std::vector<uint16_t> PCEPlane3;
-		for (auto i = 0; i < size(IndexColorImage) / 16; ++i) {
-			PCEPlane0.emplace_back(0);
-			PCEPlane1.emplace_back(0);
-			PCEPlane2.emplace_back(0);
-			PCEPlane3.emplace_back(0);
-			for (auto j = 0; j < 16; ++j) {
-				const auto Index = IndexColorImage[i * 16 + j];
-				const auto Shift = 15 - j;
-				PCEPlane0.back() |= (Index & 1) << Shift;
-				PCEPlane1.back() |= (Index & 2) << Shift;
-				PCEPlane2.back() |= (Index & 4) << Shift;
-				PCEPlane3.back() |= (Index & 8) << Shift;
-			}
-		}
-		//!< PCEパターンの出力
-		{
-			std::ofstream Out("PCEPattern.bin", std::ios::binary | std::ios::out);
-			if (!Out.bad()) {
-				Out.write(reinterpret_cast<const char*>(data(PCEPlane0)), size(PCEPlane0) * sizeof(PCEPlane0[0]));
-				Out.write(reinterpret_cast<const char*>(data(PCEPlane1)), size(PCEPlane1) * sizeof(PCEPlane1[0]));
-				Out.write(reinterpret_cast<const char*>(data(PCEPlane2)), size(PCEPlane2) * sizeof(PCEPlane2[0]));
-				Out.write(reinterpret_cast<const char*>(data(PCEPlane3)), size(PCEPlane3) * sizeof(PCEPlane3[0]));
-				Out.close();
-			}
-		}
+		//!< パレットとインデックスカラー画像(PCE)
+		IndexColorImagePCESprite ICIPCE(Image);
+		ICIPCE.CreatePalette().CreateIndexColor().Restore().OutputPalette("SPR_Palette.bin").OutputIndexColor("SPR_Pattern.bin");
 
+		cv::resize(Image, Image, cv::Size(512, 512), 0, 0, cv::INTER_NEAREST);
 		cv::imshow("resize & color reduction", Image);
 		cv::waitKey(0);
-
-#if true
-		//!< パレットとインデックスカラーから復元(チェック用)
-		{
-			cv::Mat RestoreImage(Image.size(), Image.type());
-			int k = 0;
-			for (auto i = 0; i < Image.rows; ++i) {
-				for (auto j = 0; j < Image.cols; ++j) {
-					RestoreImage.ptr<cv::Vec3b>(j)[i] = Palette[IndexColorImage[k++]];
-				}
-			}
-			cv::imshow("restore", RestoreImage);
-			cv::waitKey(0);
-		}
-#endif
 	}
 }
 
