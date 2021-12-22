@@ -48,8 +48,24 @@
 #define PALETTE_SPR14 30
 #define PALETTE_SPR15 31
 
-/* Sprite */
+/* Sprite 16x16, 16x32, 16x64, 32x16, 32x32, 32x64 */
 #define SPR_MAX 64
+
+#define SPR_PLANES 4
+
+#define SPR_SIZE_16x16 (16 * 16 * SPR_PLANES)
+#define SPR_SIZE_16x32 (16 * 32 * SPR_PLANES)
+#define SPR_SIZE_16x64 (16 * 64 * SPR_PLANES)
+#define SPR_SIZE_32x16 (32 * 16 * SPR_PLANES)
+#define SPR_SIZE_32x32 (32 * 32 * SPR_PLANES)
+#define SPR_SIZE_32x64 (32 * 64 * SPR_PLANES)
+
+#define SPR_WORDSIZE_16x16 (SPR_SIZE_16x16 / sizeof(u16))
+#define SPR_WORDSIZE_16x32 (SPR_SIZE_16x32 / sizeof(u16))
+#define SPR_WORDSIZE_16x64 (SPR_SIZE_16x64 / sizeof(u16))
+#define SPR_WORDSIZE_32x16 (SPR_SIZE_32x16 / sizeof(u16))
+#define SPR_WORDSIZE_32x32 (SPR_SIZE_32x32 / sizeof(u16))
+#define SPR_WORDSIZE_32x64 (SPR_SIZE_32x64 / sizeof(u16))
 
 /* Colors */
 #define COLOR_BLUE 0x7
