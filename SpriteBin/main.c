@@ -1,10 +1,10 @@
 #include "huc.h"
 #include "..\define.h"
 
-#incbin(Palette, "SPR_Palette.bin")
-#incbin(Pattern, "SPR_Pattern.bin")
+#incbin(Palette, "SP_Palette.bin")
+#incbin(Pattern, "SP_Pattern.bin")
 
-PutSprites()
+PutSpritesRandom()
 {
   u8 i;
   for(i = 0;i < SPR_MAX;++i){
@@ -14,7 +14,7 @@ PutSprites()
   }
 }
 
-#define SPR_VRAM 0x4000
+#define SPR_VRAM 0x6000
 
 main()
 {
@@ -34,7 +34,7 @@ main()
     spr_pri(1);
   }
 
-  PutSprites(); 
+  PutSpritesRandom(); 
   while(1){
     vsync();
 
@@ -48,7 +48,7 @@ main()
     }
 
     if(joytrg(JOY_PAD0) & (JOY_A | JOY_B)){
-      PutSprites();
+      PutSpritesRandom();
     }
    
     satb_update();

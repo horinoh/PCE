@@ -68,13 +68,14 @@
 #define SPR_WORDSIZE_32x64 (SPR_SIZE_32x64 / sizeof(u16))
 
 /* Colors */
+#define COLOR_TRANSPARENT 0x0
 #define COLOR_BLUE 0x7
 #define COLOR_RED (0x7 << 3)
 #define COLOR_GREEN (0x7 << 6)
-#define COLOR_BLACK 0x0
 #define COLOR_WHITE (COLOR_GREEN | COLOR_RED | COLOR_BLUE)
 #define COLOR_YELLOW (COLOR_GREEN | COLOR_RED)
 #define COLOR_MAGENTA (COLOR_RED | COLOR_BLUE)
+#define COLOR_BLACK ((0x1 << 6) | (0x1 << 3) | (0x1))
 #define COLOR_GRAY ((0x3 << 6) | (0x3 << 3) | (0x3))
 #define COLOR_LIGHTBLUE (COLOR_GREEN | COLOR_BLUE)
 
