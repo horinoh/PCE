@@ -18,27 +18,31 @@
 #pragma comment(lib, "opencv_world454.lib")
 #endif
 
-class IndexColorBase
+class PatternBase
 {
 public:
-	IndexColorBase(const cv::Mat& Img) : Image(Img) {}
+	PatternBase(const cv::Mat& Img) : Image(Img) {}
 
-	virtual IndexColorBase& CreatePalette() { return *this; }
-	virtual IndexColorBase& CreateIndexColor() { return *this; }
-	virtual IndexColorBase& OutputPalette([[maybe_unused]] std::string_view Path) { return *this; }
-	virtual IndexColorBase& OutputIndexColor([[maybe_unused]] std::string_view Path) { return *this; }
-	virtual IndexColorBase& Restore() { return *this; }
+	virtual PatternBase& CreatePalette() { return *this; }
+	virtual PatternBase& CreatePattern() { return *this; }
+
+	virtual const PatternBase& OutputPalette([[maybe_unused]] std::string_view Path) const { return *this; }
+	virtual const PatternBase& OutputPattern([[maybe_unused]] std::string_view Path) const { return *this; }
+	virtual const PatternBase& OutputBAT([[maybe_unused]] std::string_view Path) const { return *this; }
+
+	virtual const PatternBase& Restore() const { return *this; }
 
 protected:
 	const cv::Mat& Image;
 };
-class IndexColorImage : public IndexColorBase
+class Pattern : public PatternBase
 {
 private:
-	using Super = IndexColorBase;
+	using Super = PatternBase;
 public:	
-	IndexColorImage(const cv::Mat& Img) : Super(Img) {}
-	virtual IndexColorBase& CreatePalette() override {
+	Pattern(const cv::Mat& Img) : Super(Img) {}
+	
+	virtual PatternBase& CreatePalette() override {
 		Palettes.clear();
 		for (auto i = 0; i < Image.rows; ++i) {
 			for (auto j = 0; j < Image.cols; ++j) {
@@ -50,7 +54,7 @@ public:
 		}
 		return *this;
 	}
-	virtual IndexColorBase& CreateIndexColor() override {
+	virtual PatternBase& CreatePattern() override {
 		IndexColors.clear();
 		for (auto i = 0; i < Image.rows; ++i) {
 			for (auto j = 0; j < Image.cols; ++j) {
@@ -63,8 +67,9 @@ public:
 		}
 		return *this;
 	}
-	//!< インデックスカラーから復元して表示してみる (チェック用)
-	virtual IndexColorBase& Restore() override {
+
+	//!< 復元して表示してみる (チェック用)
+	virtual const PatternBase& Restore() const override {
 		cv::Mat RestoreImage(Image.size(), Image.type());
 		int k = 0;
 		for (auto i = 0; i < Image.rows; ++i) {
@@ -72,32 +77,40 @@ public:
 				RestoreImage.ptr<cv::Vec3b>(i)[j] = Palettes[IndexColors[k++]];
 			}
 		}
-		//!< 大きくして表示
-		cv::resize(RestoreImage, RestoreImage, cv::Size(512, 512), 0, 0, cv::INTER_NEAREST);
+		//!< 拡大表示
+		cv::resize(RestoreImage, RestoreImage, cv::Size(256, 256), 0, 0, cv::INTER_NEAREST);
 		cv::imshow("Restore", RestoreImage);
 		cv::waitKey(0);
 		return *this;
 	}
+
 protected:
 	std::vector<cv::Vec3b> Palettes;
 	std::vector<uint32_t> IndexColors;
 };
 
-class IndexColorImagePCE : public IndexColorBase
+class PatternPCE : public PatternBase
 {
 private:
-	using Super = IndexColorBase;
+	using Super = PatternBase;
 public:
-	IndexColorImagePCE(const cv::Mat& Img) : Super(Img) {}
+	PatternPCE(const cv::Mat& Img) : Super(Img) {}
+
 	//!< 0000 000G GGRR RBBB
 	static uint16_t ToPCEColor(const cv::Vec3b& Color) { return ((Color[1] >> 5) << 6) | ((Color[2] >> 5) << 3) | (Color[0] >> 5); }
 	//!< Vec3b(B, G, R)
 	static cv::Vec3b FromPCEColor(const uint16_t& Color) { return cv::Vec3b((Color & 0x7) << 5, ((Color & (0x7 << 6)) >> 6) << 5, ((Color & (0x7 << 3)) >> 3) << 5); }
+	
+	//!< パレットの先頭色 (透明色 or 背景色)
+	PatternBase& SetPaletteTopColor(const cv::Vec3b& Color) { PaletteTopColor = ToPCEColor(Color); return *this; }
+	PatternBase& SetPaletteTopColor(const uint16_t Color) { PaletteTopColor = Color; return *this; }
+	virtual uint16_t GetPaletteTopColor() const { return PaletteTopColor; }
+
 	//!< 24bitカラー -> 9bitカラー へ丸められる為、近い色だと同じ色になってしまう場合があり、想定よりもエントリが少なくなる可能性がある
-	virtual IndexColorBase& CreatePalette() override {
+	virtual PatternBase& CreatePalette() override {
 		Palettes.clear();
-		//!< パレットの先頭は透明色
-		Palettes.emplace_back(0);
+		//!< パレットの先頭は 透明色 or 背景色
+		Palettes.emplace_back(GetPaletteTopColor());
 		for (auto i = 0; i < Image.rows; ++i) {
 			for (auto j = 0; j < Image.cols; ++j) {
 				const auto Color = ToPCEColor(Image.ptr<cv::Vec3b>(i)[j]);
@@ -107,11 +120,10 @@ public:
 			}
 		}
 		std::cout << "Palette Count = " << size(Palettes) << std::endl;
-		while (size(Palettes) < 16) { Palettes.emplace_back(0); }
-		cv::Vec3b(0, 0, 0);
+		while (size(Palettes) < 16) { Palettes.emplace_back(GetPaletteTopColor()); }
 		return *this;
 	}
-	virtual IndexColorBase& CreateIndexColor() override {
+	virtual PatternBase& CreatePattern() override {
 		IndexColors.clear();
 		for (auto i = 0; i < Image.rows; ++i) {
 			for (auto j = 0; j < Image.cols; ++j) {
@@ -124,7 +136,8 @@ public:
 		}
 		return *this;
 	}
-	virtual IndexColorBase& OutputPalette(std::string_view Path) override {
+
+	virtual const PatternBase& OutputPalette(std::string_view Path) const override {
 		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 		if (!Out.bad()) {
 			Out.write(reinterpret_cast<const char*>(data(Palettes)), size(Palettes) * sizeof(Palettes[0]));
@@ -132,14 +145,15 @@ public:
 		}
 		return *this;
 	}
-	virtual IndexColorBase& OutputIndexColor(std::string_view Path) override {
+	virtual const PatternBase& OutputPattern(std::string_view Path) const override {
 		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 		if (!Out.bad()) {
 			Out.close();
 		}
 		return *this;
 	}
-	virtual IndexColorBase& Restore() override {
+
+	virtual const PatternBase& Restore() const override {
 		cv::Mat RestoreImage(Image.size(), Image.type());
 		int k = 0;
 		for (auto i = 0; i < Image.rows; ++i) {
@@ -147,25 +161,33 @@ public:
 				RestoreImage.ptr<cv::Vec3b>(i)[j] = FromPCEColor(Palettes[IndexColors[k++]]);
 			}
 		}
-		cv::resize(RestoreImage, RestoreImage, cv::Size(512, 512), 0, 0, cv::INTER_NEAREST);
+		cv::resize(RestoreImage, RestoreImage, cv::Size(256, 256), 0, 0, cv::INTER_NEAREST);
 		cv::imshow("Restore PCE", RestoreImage);
 		cv::waitKey(0);
 		return *this;
 	}
+
 protected:
+	uint16_t PaletteTopColor = ToPCEColor(cv::Vec3b(0, 0, 0));
 	std::vector<uint16_t> Palettes;
 	std::vector<uint16_t> IndexColors;
 };
 
 //!< スプライトのサイズバリエーション : SZ_16x16, SZ_16x32, SZ_16x64, SZ_32x16, SZ_32x32, SZ_32x64
-class IndexColorImagePCESprite : public IndexColorImagePCE
+class PatternPCESP : public PatternPCE
 {
 private:
-	using Super = IndexColorImagePCE;
+	using Super = PatternPCE;
 public:
-	IndexColorImagePCESprite(const cv::Mat& Img) : Super(Img) {}
-	virtual IndexColorBase& CreateIndexColor() override {
-		Super::CreateIndexColor();
+	PatternPCESP(const cv::Mat& Img) : Super(Img) {}
+
+	//!< 4つのプレーンに分けて出力
+	//!< プレーン0 : インデックス & 1
+	//!< プレーン1 : インデックス & 2
+	//!< プレーン2 : インデックス & 4
+	//!< プレーン3 : インデックス & 8
+	virtual PatternBase& CreatePattern() override {
+		Super::CreatePattern();
 
 		Plane0.clear();
 		Plane1.clear();
@@ -187,7 +209,8 @@ public:
 		}
 		return *this;
 	}
-	virtual IndexColorBase& OutputIndexColor(std::string_view Path) override {
+
+	virtual const PatternBase& OutputPattern(std::string_view Path) const override {
 		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 		if (!Out.bad()) {
 			Out.write(reinterpret_cast<const char*>(data(Plane0)), size(Plane0) * sizeof(Plane0[0]));
@@ -198,22 +221,23 @@ public:
 		}
 		return *this; 
 	}
-	virtual IndexColorBase& Restore() override {
-		//cv::Mat RestoreImage(Image.size(), Image.type());
 
-		//for (auto i = 0; i < size(IndexColors) / 16; ++i) {
-		//	for (auto j = 0; j < 16; ++j) {
-		//		const auto Shift = 15 - j;
-		//		const auto Index = (((Plane0[i] >> Shift) & 1) << 0) | ((Plane1[i] >> Shift) << 1) | ((Plane2[i] >> Shift) << 2) | ((Plane3[i] >> Shift) << 4);
-		//		const auto Index2 = IndexColors[i * 16 + j];
-		//		RestoreImage.ptr<cv::Vec3b>(i)[j] = FromPCEColor(Palettes[Index]);
-		//	}
-		//}
-		//cv::resize(RestoreImage, RestoreImage, cv::Size(512, 512), 0, 0, cv::INTER_NEAREST);
-		//cv::imshow("Restore PCE", RestoreImage);
-		//cv::waitKey(0);
+	//!< 復元して表示してみる (チェック用)
+	virtual const PatternBase& Restore() const override {
+		cv::Mat RestoreImage(Image.size(), Image.type());
+		for (auto i = 0; i < size(IndexColors) / 16; ++i) {
+			for (auto j = 0; j < 16; ++j) {
+				const auto Mask = 1 << (15 - j);
+				const auto Index = ((Plane0[i] & Mask) ? 1 : 0) | ((Plane1[i] & Mask) ? 2 : 0) | ((Plane2[i] & Mask) ? 4 : 0) | ((Plane3[i] & Mask) ? 8 : 0);
+				RestoreImage.ptr<cv::Vec3b>(i)[j] = FromPCEColor(Palettes[Index]);
+			}
+		}
+		cv::resize(RestoreImage, RestoreImage, cv::Size(256, 256), 0, 0, cv::INTER_NEAREST);
+		cv::imshow("Restore PCE SP", RestoreImage);
+		cv::waitKey(0);
 		return *this;
 	}
+
 protected:
 	std::vector<uint16_t> Plane0;
 	std::vector<uint16_t> Plane1;
@@ -221,9 +245,45 @@ protected:
 	std::vector<uint16_t> Plane3;
 };
 
+class PatternPCEBG : public PatternPCE
+{
+private:
+	using Super = PatternPCE;
+public:
+	PatternPCEBG(const cv::Mat& Img) : Super(Img) {}
+
+	virtual PatternBase& CreatePattern() override {
+		Super::CreatePattern();
+		return *this;
+	}
+
+	virtual const PatternBase& OutputPattern(std::string_view Path) const override {
+		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+		if (!Out.bad()) {
+			Out.close();
+		}
+		return *this;
+	}
+	//!< BAT (Background Attribute Table)
+	virtual const PatternBase& OutputBAT(std::string_view Path) const {
+		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+		if (!Out.bad()) {
+			Out.close();
+		}
+		return *this;
+	}
+
+	//!< 復元して表示してみる (チェック用)
+	virtual const PatternBase& Restore() const override {
+		return *this;
+	}
+
+protected:
+};
+
 int main(int argc, char* argv[])
 {
-	auto Image = cv::imread("kueken7_rgb8.jpg");
+	auto Image = cv::imread("Images/sprite.png");
 	if (1 < argc) {
 		Image = cv::imread(argv[1]);
 	}
@@ -231,7 +291,7 @@ int main(int argc, char* argv[])
 	cv::waitKey(0);
 
 	//!< リサイズ
-	cv::resize(Image, Image, cv::Size(16, 16), 0, 0, cv::INTER_NEAREST);
+	//cv::resize(Image, Image, cv::Size(16, 16), 0, 0, cv::INTER_NEAREST);
 
 	//!< 減色
 	{
@@ -260,18 +320,31 @@ int main(int argc, char* argv[])
 
 		Image = Tmp.clone();
 	}
+	//!< リサイズ、減色後の結果を(拡大表示で)プレビュー 
+	{
+		cv::Mat Dst;
+		cv::resize(Image, Dst, cv::Size(256, 256), 0, 0, cv::INTER_NEAREST);
+		cv::imshow("Resize & color reduction", Dst);
+		cv::waitKey(0);
+	}
 
 	//!< パレットとインデックスカラー画像
 	//IndexColorImage ICI(Image);
-	//ICI.CreatePalette().CreateIndexColor().Restore();
+	//ICI.CreatePalette().CreatePattern().Restore();
 
-	//!< パレットとインデックスカラー画像 (PCE)
-	IndexColorImagePCESprite ICIPCE(Image);
-	ICIPCE.CreatePalette().CreateIndexColor().Restore().OutputPalette("../../SpriteBin/SP_Palette.bin").OutputIndexColor("../../SpriteBin/SP_Pattern.bin");
-
-	cv::resize(Image, Image, cv::Size(512, 512), 0, 0, cv::INTER_NEAREST);
-	cv::imshow("resize & color reduction", Image);
-	cv::waitKey(0);
+#if 0
+	//!< パレットとインデックスカラー画像 (PCE SP)
+	IndexColorImagePCESprite PCESP(Image);
+	PCESP.
+		//SetPaletteTopColor(cv::Vec3b(255, 255, 255)).
+		CreatePalette().CreatePattern().Restore().OutputPalette("../../SpriteBin/SP_Palette.bin").OutputPattern("../../SpriteBin/SP_Pattern.bin");
+#else
+	//!< パレットとインデックスカラー画像 (PCE BG)
+	PatternPCEBG PCEBG(Image);
+	PCEBG.
+		//SetPaletteTopColor(cv::Vec3b(255, 255, 255)).
+		CreatePalette().CreatePattern().Restore().OutputPalette("../../SpriteBin/BG_Palette.bin").OutputPattern("../../SpriteBin/BG_Pattern.bin").OutputBAT("../../SpriteBin/BG_BAT.bin");;
+#endif
 }
 
 // Run program: Ctrl + F5 or Debug > Start Without Debugging menu

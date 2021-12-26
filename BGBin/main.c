@@ -4,7 +4,7 @@
 
 #incbin(Palette, "BG_Palette.bin")
 #incbin(Pattern, "BG_Pattern.bin")
-#incbin(Pattern, "BG_Bat.bin")
+#incbin(BAT, "BG_Bat.bin")
 
 #define MAP_WIDTH  48
 #define MAP_HEIGHT 12
@@ -25,25 +25,31 @@ const char Map[] = {
 
 main()
 {
-  u16 i;
+  	u16 i;
 
-  /*
-  Virtual screnn size
-  SCR_SIZE_32x32, SCR_SIZE_64x32, SCR_SIZE_128x32, SCR_SIZE_32x64, SCR_SIZE_64x64, SCR_SIZE_128x64
-  (Default is SCR_SIZE_64x32)
-  */
-  set_screen_size(SCR_SIZE_64x32);
+  	/*
+  	Virtual screnn size
+  	SCR_SIZE_32x32, SCR_SIZE_64x32, SCR_SIZE_128x32, SCR_SIZE_32x64, SCR_SIZE_64x64, SCR_SIZE_128x64
+  	(Default is SCR_SIZE_64x32)
+  	*/
+  	set_screen_size(SCR_SIZE_64x32);
 
-  set_bgpal(0, Palette, 1);
-  
-  set_map_data(Map, MAP_WIDTH, MAP_HEIGHT);
-  {
-	  set_tile_data(Tile, 12, tile_pal_ref);
+	set_bgpal(0, Palette, 1);
+
+	/*
+  	set_tile_data(Tile, 10, TilePallets);
   	load_tile(0x1000);
-  }
-	load_map(0, 0, 0, 0, 17, 12);
+  	*/
+	load_vram(0x2000, Pattern, 32*4*16);
 
-  while(1){
-    vsync();
-  }
+	load_bat(0x600, BAT, 32, 4);
+
+	/*
+	set_map_data(Map, MAP_WIDTH, MAP_HEIGHT);  
+  	load_map(0, 0, 0, 0, 17, 12);
+	*/
+
+  	while(1){
+    	vsync();
+  	}
 }

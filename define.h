@@ -67,16 +67,25 @@
 #define SPR_WORDSIZE_32x32 (SPR_SIZE_32x32 / sizeof(u16))
 #define SPR_WORDSIZE_32x64 (SPR_SIZE_32x64 / sizeof(u16))
 
+/* BG */
+#define BG_TILE_MAS 0xfff
+#define BG_PALETTE_MAS 0xf000
+#define BG_PALETTE_SFT 12
+
 /* Colors */
 #define COLOR_TRANSPARENT 0x0
+#define COLOR_BACKGROUND 0x0
 #define COLOR_BLUE 0x7
 #define COLOR_RED (0x7 << 3)
 #define COLOR_GREEN (0x7 << 6)
+#define COLOR_DARK_BLUE 0x3
+#define COLOR_DARK_RED (0x3 << 3)
+#define COLOR_DARK_GREEN (0x3 << 6)
+#define COLOR_BLACK ((0x1 << 6) | (0x1 << 3) | 0x1)
 #define COLOR_WHITE (COLOR_GREEN | COLOR_RED | COLOR_BLUE)
 #define COLOR_YELLOW (COLOR_GREEN | COLOR_RED)
 #define COLOR_MAGENTA (COLOR_RED | COLOR_BLUE)
-#define COLOR_BLACK ((0x1 << 6) | (0x1 << 3) | (0x1))
-#define COLOR_GRAY ((0x3 << 6) | (0x3 << 3) | (0x3))
+#define COLOR_GRAY (COLOR_DARK_GREEN | COLOR_DARK_RED | COLOR_DARK_BLUE)
 #define COLOR_LIGHTBLUE (COLOR_GREEN | COLOR_BLUE)
 
 /* Joypad */

@@ -52,6 +52,10 @@ const u16 Picture[] = {
 */
 
 /*
+1ビットが1ドットを表す4枚のプレーンを用意する
+それぞれのプレーンは (カラーインデックス & 1, 2, 4, 8) とのマスクとなっていて
+4枚のプレーンを合わせるとそのドットのインデックスカラー[0, 15]が分かる感じになっている
+
 Plane0 is masked part of color index with 1 -> (color index & 1) ? 1 : 0
 Plane1 is masked part of color index with 2 -> (color index & 2) ? 1 : 0
 Plane2 is masked part of color index with 4 -> (color index & 4) ? 1 : 0
