@@ -16,7 +16,6 @@
         {
             "label": "Compile and execute PCE",
             "type": "shell",
-            "command": "echo done",
             "dependsOrder": "sequence",
             "dependsOn": [
                 "Compile PCE",
