@@ -55,6 +55,7 @@
     ~~~
  - ターミナル - タスクの実行 - 上記で作成したタスク名("Compile PCE"等)を選択して実行
 
+<!--
 ## コンバートツール
 ### [OpenCV](https://sourceforge.net/projects/opencvlibrary/)
  - インストール (ここではCドライブ直下に配置)
@@ -62,6 +63,7 @@
  - Visual Studio 設定
     - 追加のインクルードディレクトリ  C:\opencv\build\include
     - 追加のライブラリディレクトリ  C:\opencv\build\x64\vc15\lib
+-->
 
 <!--
 ## メモ
