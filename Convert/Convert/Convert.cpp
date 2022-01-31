@@ -10,7 +10,10 @@
 
 #include <vector>
 #include <fstream>
+#include <filesystem>
+#include <algorithm>
 #include <string_view>
+#include <charconv>
 
 #ifdef _DEBUG
 #pragma comment(lib, "opencv_world454d.lib")
@@ -18,12 +21,25 @@
 #pragma comment(lib, "opencv_world454.lib")
 #endif
 
+static void Preview(const cv::Mat Image)
+{
+	cv::imshow("", Image);
+	cv::waitKey(0);
+}
+static void Preview(const cv::Mat Image, const cv::Size& Size)
+{
+	cv::Mat Resized;
+	cv::resize(Image, Resized, Size, 0, 0, cv::INTER_NEAREST);
+	Preview(Resized);
+}
+
 class PatternBase
 {
 public:
 	PatternBase(const cv::Mat& Img) : Image(Img) {}
 
 	virtual PatternBase& CreatePalette() { return *this; }
+	virtual PatternBase& CreateTiles() { return *this; }
 	virtual PatternBase& CreatePattern() { return *this; }
 
 	virtual const PatternBase& OutputPalette([[maybe_unused]] std::string_view Path) const { return *this; }
@@ -47,21 +63,61 @@ public:
 		for (auto i = 0; i < Image.rows; ++i) {
 			for (auto j = 0; j < Image.cols; ++j) {
 				const auto Color = Image.ptr<cv::Vec3b>(i)[j];
-				if (end(Palettes) == std::find(begin(Palettes), end(Palettes), Color)) {
+				if (end(Palettes) == std::ranges::find(Palettes, Color)) {
 					Palettes.emplace_back(Color);
 				}
 			}
 		}
 		return *this;
 	}
+	virtual PatternBase& CreateTiles() override {
+		Tiles.clear();
+
+		for (auto i = 0; i < (Image.rows >> 3); ++i) {
+			for (auto j = 0; j < (Image.cols >> 3); ++j) {
+				const auto NoFlip = Image(cv::Rect(j << 3, i << 3, 8, 8));
+				cv::Mat VFlip, HFlip, VHFlip;
+				cv::flip(NoFlip, VFlip, 0);
+				cv::flip(NoFlip, HFlip, 1);
+				cv::flip(NoFlip, VHFlip, -1);
+
+				if (end(Tiles) == std::ranges::find_if(Tiles, [&](const cv::Mat& rhs) {
+					cv::Mat Result;
+					cv::bitwise_xor(NoFlip, rhs, Result);
+					if (0 == cv::sum(Result)[0]) { return true; }
+
+					cv::bitwise_xor(VFlip, rhs, Result);
+					if (0 == cv::sum(Result)[0]) { return true; }
+
+					cv::bitwise_xor(HFlip, rhs, Result);
+					if (0 == cv::sum(Result)[0]) { return true; }
+
+					cv::bitwise_xor(VHFlip, rhs, Result);
+					if (0 == cv::sum(Result)[0]) { return true; }
+
+					return false;
+				})) {
+					Tiles.emplace_back(NoFlip);
+				}
+			}
+		}
+		return *this;
+	}
+
 	virtual PatternBase& CreatePattern() override {
+		CreatePalette();
+		CreateTiles();
+
 		IndexColors.clear();
-		for (auto i = 0; i < Image.rows; ++i) {
-			for (auto j = 0; j < Image.cols; ++j) {
-				const auto Color = Image.ptr<cv::Vec3b>(i)[j];
-				const auto It = std::find(begin(Palettes), end(Palettes), Color);
-				if (end(Palettes) != It) {
-					IndexColors.emplace_back(static_cast<uint32_t>(std::distance(begin(Palettes), It)));
+		for (auto t : Tiles) {
+			IndexColors.emplace_back();
+			for (auto i = 0; i < t.rows; ++i) {
+				for (auto j = 0; j < t.cols; ++j) {
+					const auto Color = t.ptr<cv::Vec3b>(i)[j];
+					const auto It = std::ranges::find(Palettes, Color);
+					if (end(Palettes) != It) {
+						IndexColors.back()[(i << 3) + j] = (static_cast<uint32_t>(std::distance(begin(Palettes), It)));
+					}
 				}
 			}
 		}
@@ -70,23 +126,22 @@ public:
 
 	//!< 復元して表示してみる (チェック用)
 	virtual const PatternBase& Restore() const override {
-		cv::Mat RestoreImage(Image.size(), Image.type());
-		int k = 0;
-		for (auto i = 0; i < Image.rows; ++i) {
-			for (auto j = 0; j < Image.cols; ++j) {
-				RestoreImage.ptr<cv::Vec3b>(i)[j] = Palettes[IndexColors[k++]];
+		for (auto IC : IndexColors) {
+			cv::Mat Tile(cv::Size(8, 8), Image.type());
+			for (auto i = 0; i < Tile.rows; ++i) {
+				for (auto j = 0; j < Tile.cols; ++j) {
+					Tile.ptr<cv::Vec3b>(i)[j] = Palettes[IC[(i << 3) + j]];
+				}
 			}
+			//Preview(Tile, cv::Size(256, 256));
 		}
-		//!< 拡大表示
-		cv::resize(RestoreImage, RestoreImage, cv::Size(256, 256), 0, 0, cv::INTER_NEAREST);
-		cv::imshow("Restore", RestoreImage);
-		cv::waitKey(0);
 		return *this;
 	}
 
 protected:
 	std::vector<cv::Vec3b> Palettes;
-	std::vector<uint32_t> IndexColors;
+	std::vector<cv::Mat> Tiles;
+	std::vector<std::array<uint32_t, 8 * 8>> IndexColors;
 };
 
 class PatternPCE : public PatternBase
@@ -114,7 +169,7 @@ public:
 		for (auto i = 0; i < Image.rows; ++i) {
 			for (auto j = 0; j < Image.cols; ++j) {
 				const auto Color = ToPCEColor(Image.ptr<cv::Vec3b>(i)[j]);
-				if (end(Palettes) == std::find(begin(Palettes), end(Palettes), Color)) {
+				if (end(Palettes) == std::ranges::find(Palettes, Color)) {
 					Palettes.emplace_back(Color);
 				}
 			}
@@ -124,11 +179,13 @@ public:
 		return *this;
 	}
 	virtual PatternBase& CreatePattern() override {
+		CreatePalette();
+
 		IndexColors.clear();
 		for (auto i = 0; i < Image.rows; ++i) {
 			for (auto j = 0; j < Image.cols; ++j) {
 				const auto Color = ToPCEColor(Image.ptr<cv::Vec3b>(i)[j]);
-				const auto It = std::find(begin(Palettes), end(Palettes), Color);
+				const auto It = std::ranges::find(Palettes, Color);
 				if (end(Palettes) != It) {
 					IndexColors.emplace_back(static_cast<uint32_t>(std::distance(begin(Palettes), It)));
 				}
@@ -161,9 +218,7 @@ public:
 				RestoreImage.ptr<cv::Vec3b>(i)[j] = FromPCEColor(Palettes[IndexColors[k++]]);
 			}
 		}
-		cv::resize(RestoreImage, RestoreImage, cv::Size(256, 256), 0, 0, cv::INTER_NEAREST);
-		cv::imshow("Restore PCE", RestoreImage);
-		cv::waitKey(0);
+		Preview(RestoreImage, cv::Size(256, 256));
 		return *this;
 	}
 
@@ -232,9 +287,7 @@ public:
 				RestoreImage.ptr<cv::Vec3b>(i)[j] = FromPCEColor(Palettes[Index]);
 			}
 		}
-		cv::resize(RestoreImage, RestoreImage, cv::Size(256, 256), 0, 0, cv::INTER_NEAREST);
-		cv::imshow("Restore PCE SP", RestoreImage);
-		cv::waitKey(0);
+		Preview(RestoreImage, cv::Size(256, 256));
 		return *this;
 	}
 
@@ -295,7 +348,7 @@ public:
 		for (auto i = 0; i < Image.rows; ++i) {
 			for (auto j = 0; j < Image.cols; ++j) {
 				const auto Color = Image.ptr<cv::Vec3b>(i)[j];
-				if (end(Palettes) == std::find(begin(Palettes), end(Palettes), Color)) {
+				if (end(Palettes) == std::ranges::find(Palettes, Color)) {
 					Palettes.emplace_back(Color);
 				}
 			}
@@ -305,11 +358,13 @@ public:
 		return *this;
 	}
 	virtual PatternBase& CreatePattern() override {
+		CreatePalette();
+
 		IndexColors.clear();
 		for (auto i = 0; i < Image.rows; ++i) {
 			for (auto j = 0; j < Image.cols; ++j) {
 				const auto Color = Image.ptr<cv::Vec3b>(i)[j];
-				const auto It = std::find(begin(Palettes), end(Palettes), Color);
+				const auto It = std::ranges::find(Palettes, Color);
 				if (end(Palettes) != It) {
 					IndexColors.emplace_back(static_cast<uint32_t>(std::distance(begin(Palettes), It)));
 				}
@@ -318,11 +373,11 @@ public:
 
 		Plane0.clear();
 		Plane1.clear();
-		for (auto i = 0; i < size(IndexColors) / 8; ++i) {
+		for (auto i = 0; i < size(IndexColors) >> 3; ++i) {
 			Plane0.emplace_back(0);
 			Plane1.emplace_back(0);
 			for (auto j = 0; j < 8; ++j) {
-				const auto Index = IndexColors[i * 8 + j];
+				const auto Index = IndexColors[(i << 3) + j];
 				const auto Shift = 8 - j;
 				Plane0.back() |= ((Index & 1) ? 1 : 0) << Shift;
 				Plane1.back() |= ((Index & 2) ? 1 : 0) << Shift;
@@ -360,9 +415,7 @@ public:
 				RestoreImage.ptr<cv::Vec3b>(i)[j] = Palettes[IndexColors[k++]];
 			}
 		}
-		cv::resize(RestoreImage, RestoreImage, cv::Size(256, 256), 0, 0, cv::INTER_NEAREST);
-		cv::imshow("Restore FC", RestoreImage);
-		cv::waitKey(0);
+		Preview(RestoreImage, cv::Size(256, 256));
 		return *this;
 	}
 
@@ -374,15 +427,106 @@ protected:
 	std::vector<uint16_t> Plane1;
 };
 
+static void ProcessPalette(std::string_view Name, std::string_view File)
+{
+	if (!empty(File)) {
+		auto Image = cv::imread(data(File));
+		Pattern(Image).CreatePalette();
+		//Preview(Image);
+	}
+}
+static void ProcessTileSet(std::string_view Name, std::string_view File, std::string_view Compression, std::string_view Option)
+{
+	if (!empty(File)) {
+		auto Image = cv::imread(data(File));
+		Pattern(Image).CreatePattern();
+		Preview(Image);
+	}
+}
+static void ProcessMap(std::string_view Name, std::string_view File, std::string_view TileSet, std::string_view Compression, const uint32_t Mapbase)
+{
+}
+static void ProcessSprite(std::string_view Name, std::string_view File, const uint32_t Width, const uint32_t Height, std::string_view Compression, const uint32_t Time, std::string_view Collision, std::string_view Opt, const uint32_t Iteration)
+{
+}
 int main(int argc, char* argv[])
 {
-	auto Image = cv::imread("sprite.png");
-	if (1 < argc) {
-		Image = cv::imread(argv[1]);
-	}
-	cv::imshow("Original", Image);
-	cv::waitKey(0);
+	//!< ターゲットフォルダ (Target folder)
+	std::string_view Path = ".";
+	for (const auto& i : std::filesystem::directory_iterator(Path)) {
+		if (!i.is_directory()) {
+			//!< .res ファイルを探す (Search for .res files)
+			if (i.path().has_extension() && ".res" == i.path().extension().string()) {
+				std::ifstream In(i.path().filename().string(), std::ios::in);
+				if (!In.fail()) {
+					//!< 行を読み込む (Read line)
+					std::string Line;
+					while (std::getline(In, Line)) {
+						//!< 項目を読み込む (Read items)
+						std::vector<std::string> Items;
+						std::stringstream SS(Line);
+						std::string Item;
+						while (std::getline(SS, Item, ' ')) {
+							Items.emplace_back(Item);
+						}
 
+						if (!empty(Items)) {
+							//!< 画像ファイル名から " を取り除く (Remove " from image file name)
+							std::erase(Items[2], '"');
+
+							if ("PALETTE" == Items[0]) {
+								ProcessPalette(Items[1], Items[2]);
+							}
+							if ("TILESET" == Items[0]) {
+								ProcessTileSet(Items[1], Items[2], size(Items) > 3 ? Items[3] : "", size(Items) > 4 ? Items[4] : "");
+							}
+							if ("MAP" == Items[0]) {
+								uint32_t MapBase = 0;
+								if (size(Items) > 5) {
+									auto [ptr, ec] = std::from_chars(data(Items[5]), data(Items[5]) + size(Items[5]), MapBase);
+									if (std::errc() != ec) {}
+								}
+								ProcessMap(Items[1], Items[2], Items[3], size(Items) > 4 ? Items[4] : "", MapBase);
+							}
+							if ("SPRITE" == Items[0]) {
+								uint32_t Width = 0;
+								auto [ptr0, ec0] = std::from_chars(data(Items[3]), data(Items[3]) + size(Items[3]), Width);
+								if (std::errc() != ec0) {}
+
+								uint32_t Height = 0;
+								auto [ptr1, ec1] = std::from_chars(data(Items[4]), data(Items[4]) + size(Items[4]), Height);
+								if (std::errc() != ec1) {}
+
+								uint32_t Time = 0;
+								if (size(Items) > 6) {
+									auto [ptr, ec] = std::from_chars(data(Items[6]), data(Items[6]) + size(Items[6]), Time);
+									if (std::errc() != ec) {}
+								}
+
+								uint32_t Iteration = 500000;
+								if (size(Items) > 9) {
+									auto [ptr, ec] = std::from_chars(data(Items[9]), data(Items[9]) + size(Items[9]), Iteration);
+									if (std::errc() != ec) {}
+								}
+
+								ProcessSprite(Items[1], Items[2], Width, Height, size(Items) > 5 ? Items[5] : "", Time, size(Items) > 7 ? Items[7] : "", size(Items) > 8 ? Items[8] : "", Iteration);
+							}
+						}
+					}
+					In.close();
+				}
+			}
+		}
+	}
+
+	//auto Image = cv::imread("sprite.png");
+	//if (1 < argc) {
+	//	Image = cv::imread(argv[1]);
+	//}
+	//Preview(Image, cv::Size(256, 256));
+
+	//!< リサイズと減色は予めやってもらう体とする
+#if false
 	//!< リサイズ
 	//cv::resize(Image, Image, cv::Size(16, 16), 0, 0, cv::INTER_NEAREST);
 	cv::resize(Image, Image, cv::Size(8, 8), 0, 0, cv::INTER_NEAREST);
@@ -415,33 +559,25 @@ int main(int argc, char* argv[])
 		Image = Tmp.clone();
 	}
 	//!< リサイズ、減色後の結果を(拡大表示で)プレビュー 
-	{
-		cv::Mat Dst;
-		cv::resize(Image, Dst, cv::Size(256, 256), 0, 0, cv::INTER_NEAREST);
-		cv::imshow("Resize & color reduction", Dst);
-		cv::waitKey(0);
-	}
-
-	//!< パレットとインデックスカラー画像
-	//IndexColorImage ICI(Image);
-	//ICI.CreatePalette().CreatePattern().Restore();
+	Preview(Image, cv::Size(256, 256));
+#endif
 
 #if 0
 	//!< パレットとインデックスカラー画像 (PCE SP)
 	IndexColorImagePCESprite PCESP(Image);
 	PCESP.
 		//SetPaletteTopColor(cv::Vec3b(255, 255, 255)).
-		CreatePalette().CreatePattern().Restore().OutputPalette("../../SpriteBin/SP_Palette.bin").OutputPattern("../../SpriteBin/SP_Pattern.bin");
+		CreatePattern().Restore().OutputPalette("../../SpriteBin/SP_Palette.bin").OutputPattern("../../SpriteBin/SP_Pattern.bin");
 #else
 	//!< パレットとインデックスカラー画像 (PCE BG)
-	PatternPCEBG PCEBG(Image);
-	PCEBG.
-		//SetPaletteTopColor(cv::Vec3b(255, 255, 255)).
-		CreatePalette().CreatePattern().Restore().OutputPalette("../../SpriteBin/BG_Palette.bin").OutputPattern("../../SpriteBin/BG_Pattern.bin").OutputBAT("../../SpriteBin/BG_BAT.bin");
+	//PatternPCEBG PCEBG(Image);
+	//PCEBG.
+	//	//SetPaletteTopColor(cv::Vec3b(255, 255, 255)).
+	//	CreatePattern().Restore().OutputPalette("../../SpriteBin/BG_Palette.bin").OutputPattern("../../SpriteBin/BG_Pattern.bin").OutputBAT("../../SpriteBin/BG_BAT.bin");
 #endif
 
-	PatternFC FC(Image);
-	FC.CreatePalette().CreatePattern().Restore()./*OutputPalette("../../SpriteBin/FC_Palette.h").*/OutputPattern("../../SpriteBin/FC_Pattern.h");
+	//PatternFC FC(Image);
+	//FC.CreatePattern().Restore()./*OutputPalette("../../SpriteBin/FC_Palette.h").*/OutputPattern("../../SpriteBin/FC_Pattern.h");
 }
 
 // Run program: Ctrl + F5 or Debug > Start Without Debugging menu
