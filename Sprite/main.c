@@ -182,6 +182,7 @@ PutSpritesRandom()
   }
 }
 
+  /* Free memory range is [0x800, 0xfff] and [0x5000, 0x7eff], here use latter */
 #define SPR_VRAM 0x4000/*0x6000*/
 
 main()
