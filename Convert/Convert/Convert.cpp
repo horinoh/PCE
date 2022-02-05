@@ -21,26 +21,14 @@
 #pragma comment(lib, "opencv_world454.lib")
 #endif
 
-static void Preview(const cv::Mat Image)
-{
-	cv::imshow("", Image);
-	cv::waitKey(0);
-}
-static void Preview(const cv::Mat Image, const cv::Size& Size)
-{
-	cv::Mat Resized;
-	cv::resize(Image, Resized, Size, 0, 0, cv::INTER_NEAREST);
-	Preview(Resized);
-}
-
 class PatternBase
 {
 public:
 	PatternBase(const cv::Mat& Img) : Image(Img) {}
 
 	virtual PatternBase& CreatePalette() { return *this; }
-	virtual PatternBase& CreateTiles() { return *this; }
 	virtual PatternBase& CreatePattern() { return *this; }
+	virtual PatternBase& Create() { return *this; }
 
 	virtual const PatternBase& OutputPalette([[maybe_unused]] std::string_view Path) const { return *this; }
 	virtual const PatternBase& OutputPattern([[maybe_unused]] std::string_view Path) const { return *this; }
@@ -48,17 +36,33 @@ public:
 
 	virtual const PatternBase& Restore() const { return *this; }
 
+	static void Preview(const cv::Mat Image) {
+		cv::imshow("", Image);
+		cv::waitKey(0);
+	}
+	static void Preview(const cv::Mat Image, const cv::Size& Size) {
+		cv::Mat Resized;
+		cv::resize(Image, Resized, Size, 0, 0, cv::INTER_NEAREST);
+		Preview(Resized);
+	}
+
 protected:
 	const cv::Mat& Image;
 };
+
+template <uint32_t W, uint32_t H>
+using PatternI = std::array<uint32_t, W * H>;
+
+template<uint32_t W = 8, uint32_t H = 8>
 class Pattern : public PatternBase
 {
 private:
 	using Super = PatternBase;
 public:	
-	Pattern(const cv::Mat& Img) : Super(Img) {}
+	Pattern(const cv::Mat& Img) : Super(Img), MapSize(Image.cols / W, Image.rows / H) {}
 	
-	virtual PatternBase& CreatePalette() override {
+	virtual PatternBase& Create() override {
+#pragma region PALETTE
 		Palettes.clear();
 		for (auto i = 0; i < Image.rows; ++i) {
 			for (auto j = 0; j < Image.cols; ++j) {
@@ -68,20 +72,20 @@ public:
 				}
 			}
 		}
-		return *this;
-	}
-	virtual PatternBase& CreateTiles() override {
-		Tiles.clear();
+#pragma endregion
 
-		for (auto i = 0; i < (Image.rows >> 3); ++i) {
-			for (auto j = 0; j < (Image.cols >> 3); ++j) {
-				const auto NoFlip = Image(cv::Rect(j << 3, i << 3, 8, 8));
+#pragma region MAP
+		std::vector<cv::Mat> CCPatterns; //!< Color Component Patterns
+		Maps.clear();
+		for (auto i = 0; i < MapSize.height; ++i) {
+			for (auto j = 0; j < MapSize.width; ++j) {
+				const auto NoFlip = Image(cv::Rect(j * W, i * H, W, H));
 				cv::Mat VFlip, HFlip, VHFlip;
 				cv::flip(NoFlip, VFlip, 0);
 				cv::flip(NoFlip, HFlip, 1);
 				cv::flip(NoFlip, VHFlip, -1);
 
-				if (end(Tiles) == std::ranges::find_if(Tiles, [&](const cv::Mat& rhs) {
+				const auto It = std::ranges::find_if(CCPatterns, [&](const cv::Mat& rhs) {
 					cv::Mat Result;
 					cv::bitwise_xor(NoFlip, rhs, Result);
 					if (0 == cv::sum(Result)[0]) { return true; }
@@ -96,52 +100,191 @@ public:
 					if (0 == cv::sum(Result)[0]) { return true; }
 
 					return false;
-				})) {
-					Tiles.emplace_back(NoFlip);
+				});
+				if (end(CCPatterns) != It) {
+					Maps.emplace_back(static_cast<uint32_t>(std::distance(begin(CCPatterns), It)));
+				}
+				else {
+					Maps.emplace_back(static_cast<uint32_t>(size(CCPatterns)));
+					CCPatterns.emplace_back(NoFlip);
 				}
 			}
 		}
-		return *this;
-	}
-
-	virtual PatternBase& CreatePattern() override {
-		CreatePalette();
-		CreateTiles();
-
-		IndexColors.clear();
-		for (auto t : Tiles) {
-			IndexColors.emplace_back();
-			for (auto i = 0; i < t.rows; ++i) {
-				for (auto j = 0; j < t.cols; ++j) {
-					const auto Color = t.ptr<cv::Vec3b>(i)[j];
-					const auto It = std::ranges::find(Palettes, Color);
+#pragma endregion
+		
+#pragma region PATTERN
+		Patterns.clear();
+		for (auto ccp : CCPatterns) {
+			Patterns.emplace_back();
+			for (auto i = 0; i < ccp.rows; ++i) {
+				for (auto j = 0; j < ccp.cols; ++j) {
+					const auto It = std::ranges::find(Palettes, ccp.ptr<cv::Vec3b>(i)[j]);
 					if (end(Palettes) != It) {
-						IndexColors.back()[(i << 3) + j] = (static_cast<uint32_t>(std::distance(begin(Palettes), It)));
+						Patterns.back()[i * W + j] = (static_cast<uint32_t>(std::distance(begin(Palettes), It)));
 					}
 				}
 			}
 		}
+#pragma endregion
+		Restore();
 		return *this;
 	}
 
 	//!< 復元して表示してみる (チェック用)
 	virtual const PatternBase& Restore() const override {
-		for (auto IC : IndexColors) {
-			cv::Mat Tile(cv::Size(8, 8), Image.type());
-			for (auto i = 0; i < Tile.rows; ++i) {
-				for (auto j = 0; j < Tile.cols; ++j) {
-					Tile.ptr<cv::Vec3b>(i)[j] = Palettes[IC[(i << 3) + j]];
+		cv::Mat Res(Image.size(), Image.type());
+		for (auto m = 0; m < size(Maps); ++m) {
+			cv::Mat Tile(cv::Size(W, H), Image.type());
+			for (auto i = 0; i < H; ++i) {
+				for (auto j = 0; j < W; ++j) {
+					Tile.ptr<cv::Vec3b>(i)[j] = Palettes[Patterns[Maps[m]][i * W + j]];
 				}
 			}
-			//Preview(Tile, cv::Size(256, 256));
+			Tile.copyTo(Res(cv::Rect((m % MapSize.width) * W, (m / MapSize.width) * H, W, H)));
 		}
+		Preview(Res);
+
 		return *this;
 	}
 
 protected:
+	cv::Size MapSize;
 	std::vector<cv::Vec3b> Palettes;
-	std::vector<cv::Mat> Tiles;
-	std::vector<std::array<uint32_t, 8 * 8>> IndexColors;
+	std::vector<PatternI<W, H>> Patterns;
+	std::vector<uint32_t> Maps;
+};
+
+class Converter
+{
+public:
+	Converter(const cv::Mat& Img) : Image(Img) {}
+
+	virtual Converter& Create() { return *this; }
+
+	virtual const Converter& Restore() const { return *this; }
+
+	static void Preview(const cv::Mat Image) {
+		cv::imshow("", Image);
+		cv::waitKey(0);
+	}
+	static void Preview(const cv::Mat Image, const cv::Size& Size) {
+		cv::Mat Resized;
+		cv::resize(Image, Resized, Size, 0, 0, cv::INTER_NEAREST);
+		Preview(Resized);
+	}
+
+protected:
+	const cv::Mat& Image;
+};
+
+template <uint32_t W, uint32_t H>
+using Pattern = std::array<uint32_t, W* H>;
+
+template<uint32_t W = 8, uint32_t H = 8>
+class ConverterPCEImage : public Converter
+{
+private:
+	using Super = Converter;
+public:
+	ConverterPCEImage(const cv::Mat& Img) : Super(Img) {}
+
+	virtual Converter& Create() override {
+		//!< 3ビットカラーにして、8x8パターンに分割(ローカル変数)
+		
+		//!< 各パターンのパレットを作りソート、全く同じパレットが存在すれば追加しない(メンバ変数)
+		
+		//!< インデックスカラーの8x8パターン(メンバ変数)、マップ(パターン番号、パレット番号を持つ)(メンバ変数)を作成
+
+#pragma region PALETTE
+		Palettes.clear();
+		for (auto i = 0; i < Image.rows; ++i) {
+			for (auto j = 0; j < Image.cols; ++j) {
+				const auto Color = Image.ptr<cv::Vec3b>(i)[j];
+				if (end(Palettes) == std::ranges::find(Palettes, Color)) {
+					Palettes.emplace_back(Color);
+				}
+			}
+		}
+#pragma endregion
+
+#pragma region MAP
+		std::vector<cv::Mat> CCPatterns; //!< Color Component Patterns
+		Maps.clear();
+		for (auto i = 0; i < MapSize.height; ++i) {
+			for (auto j = 0; j < MapSize.width; ++j) {
+				const auto NoFlip = Image(cv::Rect(j * W, i * H, W, H));
+				cv::Mat VFlip, HFlip, VHFlip;
+				cv::flip(NoFlip, VFlip, 0);
+				cv::flip(NoFlip, HFlip, 1);
+				cv::flip(NoFlip, VHFlip, -1);
+
+				const auto It = std::ranges::find_if(CCPatterns, [&](const cv::Mat& rhs) {
+					cv::Mat Result;
+					cv::bitwise_xor(NoFlip, rhs, Result);
+					if (0 == cv::sum(Result)[0]) { return true; }
+
+					cv::bitwise_xor(VFlip, rhs, Result);
+					if (0 == cv::sum(Result)[0]) { return true; }
+
+					cv::bitwise_xor(HFlip, rhs, Result);
+					if (0 == cv::sum(Result)[0]) { return true; }
+
+					cv::bitwise_xor(VHFlip, rhs, Result);
+					if (0 == cv::sum(Result)[0]) { return true; }
+
+					return false;
+					});
+				if (end(CCPatterns) != It) {
+					Maps.emplace_back(static_cast<uint32_t>(std::distance(begin(CCPatterns), It)));
+				}
+				else {
+					Maps.emplace_back(static_cast<uint32_t>(size(CCPatterns)));
+					CCPatterns.emplace_back(NoFlip);
+				}
+			}
+		}
+#pragma endregion
+
+#pragma region PATTERN
+		Patterns.clear();
+		for (auto ccp : CCPatterns) {
+			Patterns.emplace_back();
+			for (auto i = 0; i < ccp.rows; ++i) {
+				for (auto j = 0; j < ccp.cols; ++j) {
+					const auto It = std::ranges::find(Palettes, ccp.ptr<cv::Vec3b>(i)[j]);
+					if (end(Palettes) != It) {
+						Patterns.back()[i * W + j] = (static_cast<uint32_t>(std::distance(begin(Palettes), It)));
+					}
+				}
+			}
+		}
+#pragma endregion
+		Restore();
+		return *this;
+	}
+
+	//!< 復元して表示してみる (チェック用)
+	virtual const Converter& Restore() const override {
+		cv::Mat Res(Image.size(), Image.type());
+		for (auto m = 0; m < size(Maps); ++m) {
+			cv::Mat Tile(cv::Size(W, H), Image.type());
+			for (auto i = 0; i < H; ++i) {
+				for (auto j = 0; j < W; ++j) {
+					Tile.ptr<cv::Vec3b>(i)[j] = Palettes[Patterns[Maps[m]][i * W + j]];
+				}
+			}
+			Tile.copyTo(Res(cv::Rect((m % MapSize.width) * W, (m / MapSize.width) * H, W, H)));
+		}
+		Preview(Res);
+
+		return *this;
+	}
+
+protected:
+	cv::Size MapSize;
+	std::vector<cv::Vec3b> Palettes;
+	std::vector<Pattern<W, H>> Patterns;
+	std::vector<uint32_t> Maps;
 };
 
 class PatternPCE : public PatternBase
@@ -431,16 +574,16 @@ static void ProcessPalette(std::string_view Name, std::string_view File)
 {
 	if (!empty(File)) {
 		auto Image = cv::imread(data(File));
-		Pattern(Image).CreatePalette();
-		//Preview(Image);
+		Pattern(Image).Create();
+		//PatternBase::Preview(Image);
 	}
 }
 static void ProcessTileSet(std::string_view Name, std::string_view File, std::string_view Compression, std::string_view Option)
 {
 	if (!empty(File)) {
 		auto Image = cv::imread(data(File));
-		Pattern(Image).CreatePattern();
-		Preview(Image);
+		Pattern(Image).Create();
+		//PatternBase::Preview(Image);
 	}
 }
 static void ProcessMap(std::string_view Name, std::string_view File, std::string_view TileSet, std::string_view Compression, const uint32_t Mapbase)
