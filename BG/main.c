@@ -278,11 +278,14 @@ const u8 Map[] = {
   0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
   0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
-  0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+  0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 };
 
 #define MAP_TILE_W 16 /* 256 pixel */
-#define MAP_TILE_H 28 /* 448 pixel */
+#define MAP_TILE_H 31 /* 496 pixel */
 
 #define SCR_TILE_W (SCREEN_WIDTH>>4)
 #define SCR_TILE_H (SCREEN_HEIGHT>>4)
@@ -313,7 +316,7 @@ main()
   */
 	load_map(x >> 4, y >> 4, MapX, MapY, SCR_TILE_W, SCR_TILE_H);
 
-  while(1){
+  while(1) {
     KeyState = joy(JOY_PAD0);
     /*
     if(KeyState & JOY_LEFT) --x;
@@ -322,9 +325,9 @@ main()
     if(KeyState & JOY_UP) { y = (y - 1) & 0xff; }
     /*if(KeyState & JOY_DOWN) ++y;*/
 
-    if((y & 15)==0) {
+    if(!(y & 15)) {
       --MapY;
-      if(MapY<0){MapY+=MAP_TILE_H;}
+      if(MapY < 0) { MapY += MAP_TILE_H; }
       load_map(x >> 4, (y >> 4) - 1, MapX, MapY - 1, SCR_TILE_W, 1);
     }
 
