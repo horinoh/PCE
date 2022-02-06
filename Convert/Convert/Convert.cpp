@@ -161,6 +161,9 @@ public:
 
 	virtual Converter& Create() { return *this; }
 
+	virtual const Converter& OutputPalette(std::string_view Path) const { return *this; }
+	virtual const Converter& OutputPattern(std::string_view Path) const { return *this; }
+
 	virtual const Converter& Restore() const { return *this; }
 
 	static void Preview(const cv::Mat Image) {
@@ -186,8 +189,8 @@ public:
 	std::array<uint32_t, W * H> ColorIndices;
 };
 
-template<uint32_t W = 8, uint32_t H = 8>
-class ConverterPCEImage : public Converter
+template<uint32_t W, uint32_t H>
+class ConverterPCE : public Converter
 {
 private:
 	using Super = Converter;
@@ -197,7 +200,7 @@ public:
 	//!< Vec3b(B, G, R)
 	static cv::Vec3b FromPCEColor(const uint16_t& Color) { return cv::Vec3b((Color & 0x7) << 5, ((Color & (0x7 << 6)) >> 6) << 5, ((Color & (0x7 << 3)) >> 3) << 5); }
 
-	ConverterPCEImage(const cv::Mat& Img) : Super(Img), MapSize(Image.cols / W, Image.rows / H) {}
+	ConverterPCE(const cv::Mat& Img) : Super(Img), MapSize(Image.cols / W, Image.rows / H) {}
 
 	virtual Converter& Create() override {
 #pragma region MAP
@@ -244,7 +247,6 @@ public:
 		for (auto p : CCPatterns) {
 			//!< パターン毎にパレットを作る
 			PCEPalette Pal;
-			Pal.emplace_back(0); //!< 先頭に透明カラーを追加 (ここでは 0 を透明とする)
 			for (auto i = 0; i < p.rows; ++i) {
 				for (auto j = 0; j < p.cols; ++j) {
 					const auto Color = ToPCEColor(p.ptr<cv::Vec3b>(i)[j]);
@@ -253,9 +255,9 @@ public:
 					}
 				}
 			}
-			//!< PCE ではパレットに 16 色まで(透明を含む)
-			if (size(Pal) > 16) {
-				std::cerr << "Pal Exceed" << std::endl;
+			//!< PCE ではパレットに 16 色まで (先頭に透明色が入ることになるのでここでは 15 色までに収まっていないといけない)
+			if (size(Pal) > 15) {
+				std::cerr << "Color Exceed" << std::endl;
 			}
 			//!< 同一パレット検出のためソートしておく
 			std::ranges::sort(Pal);
@@ -269,20 +271,24 @@ public:
 			else {
 				PaletteIndices.emplace_back(static_cast<uint32_t>(std::distance(begin(Palettes), It)));
 			}
+			//!< PCE ではパレット数 16 まで (BG、スプライトそれぞれ 16)
+			if (size(Palettes) > 16) {
+				std::cerr << "Palette Exceed" << std::endl;
+			}
 		}
 #pragma endregion
 
 #pragma region PATTERN
 		//!< 使用パレット番号と、インデックスカラー表現のパターンを格納
 		Patterns.clear();
-		int ii = 0;
-		for (auto p : CCPatterns) {
+		for (auto p = 0; p < size(CCPatterns); ++p) {
+			const auto& Pat = CCPatterns[p];
 			Patterns.emplace_back();
-			Patterns.back().PaletteIndex = PaletteIndices[ii++/*std::distance(begin(CCPatterns), p)*/];
+			Patterns.back().PaletteIndex = PaletteIndices[p];
 			const auto& Pal = Palettes[Patterns.back().PaletteIndex];
-			for (auto i = 0; i < p.rows; ++i) {
-				for (auto j = 0; j < p.cols; ++j) {
-					Patterns.back().ColorIndices[i * W + j] = static_cast<uint32_t>(std::distance(begin(Pal), std::ranges::find(Pal, ToPCEColor(p.ptr<cv::Vec3b>(i)[j]))));
+			for (auto i = 0; i < Pat.rows; ++i) {
+				for (auto j = 0; j < Pat.cols; ++j) {
+					Patterns.back().ColorIndices[i * W + j] = static_cast<uint32_t>(std::distance(begin(Pal), std::ranges::find(Pal, ToPCEColor(Pat.ptr<cv::Vec3b>(i)[j]))));
 				}
 			}
 		}
@@ -290,6 +296,29 @@ public:
 		
 		Restore();
 		
+		return *this;
+	}
+
+	virtual const Converter& OutputPalette(std::string_view Path) const override {
+		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+		if (!Out.bad()) {
+			for (auto i : Palettes) {
+				const uint16_t Color = 0;
+				Out.write(reinterpret_cast<const char*>(&Color), sizeof(Color)); //!< 先頭に透明色(ここでは0)を出力
+				Out.write(reinterpret_cast<const char*>(data(i)), size(i) * sizeof(i[0]));
+				for (auto j = size(i); j < 16; j++) {
+					Out.write(reinterpret_cast<const char*>(&Color), sizeof(Color)); //!< 空き要素分を出力
+				}
+			}
+			Out.close();
+		}
+		return *this;
+	}
+	virtual const Converter& OutputPattern(std::string_view Path) const override {
+		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+		if (!Out.bad()) {
+			Out.close();
+		}
 		return *this;
 	}
 
@@ -316,7 +345,115 @@ protected:
 	cv::Size MapSize;
 	std::vector<PCEPalette> Palettes;
 	std::vector<PCEPattern<W, H>> Patterns;
-	std::vector<uint32_t> Maps;
+	std::vector<uint16_t> Maps;
+};
+
+//!< BGImage : スクロールさせない静止画向き
+//!< パターン、パレット、BAT(Background Attribute Table) を出力
+//!< BAT はパターン番号とパレット番号を含むマップ
+template<uint32_t W = 8, uint32_t H = 8>
+class ConverterPCEImage : public ConverterPCE<W, H>
+{
+private:
+	using Super = ConverterPCE<W, H>;
+public:
+	ConverterPCEImage(const cv::Mat& Img) : Super(Img) {}
+
+	virtual const Converter& OutputPattern(std::string_view Path) const override {
+		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+		if (!Out.bad()) {
+			for (auto p : this->Patterns) {
+				const auto& Pal = this->Palettes[p.PaletteIndex];
+				for (auto i = 0; i < H; ++i) {
+					for (auto j = 0; j < W; ++j) {
+						//Pal[p.ColorIndices[i * W + j]];
+					}
+				}
+			}
+			Out.close();
+		}
+		return *this;
+	}
+	virtual const Converter& OutputBAT(std::string_view Path) const {
+		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+		if (!Out.bad()) {
+			for (auto m = 0; m < size(this->Maps); ++m) {
+				const auto PatIdx = this->Maps[m];
+				const auto PalIdx = this->Patterns[PatIdx].PaletteIndex;
+
+				const uint16_t bat = (PalIdx << 12) | PatIdx + 256;;
+				Out.write(reinterpret_cast<const char*>(&bat), sizeof(bat));
+			}
+			Out.close();
+		}
+		return *this;
+	}
+	
+	const Converter& Output(std::string_view PalettePath, std::string_view PatternPath, std::string_view BATPath) const {
+		OutputPalette<W, H>(PalettePath);
+		OutputPattern(PatternPath);
+		OutputBAT(BATPath);
+		return *this;
+	}
+};
+
+//!< BG : スクロールさせる背景
+//!< パターン、パレット、マップを出力
+template<uint32_t W = 16, uint32_t H = 16>
+class ConverterPCEBG : public ConverterPCE<W, H>
+{
+private:
+	using Super = ConverterPCE<W, H>;
+public:
+	ConverterPCEBG(const cv::Mat& Img) : Super(Img) {}
+
+	virtual const Converter& OutputPattern(std::string_view Path) const override {
+		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+		if (!Out.bad()) {
+			Out.close();
+		}
+		return *this;
+	}
+	virtual const Converter& OutputMap(std::string_view Path) const {
+		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+		if (!Out.bad()) {
+			Out.close();
+		}
+		return *this;
+	}
+
+	const Converter& Output(std::string_view PalettePath, std::string_view PatternPath, std::string_view MapPath) const {
+		OutputPalette<W, H>(PalettePath);
+		OutputPattern(PatternPath);
+		OutputMap(MapPath);
+		return *this;
+	}
+};
+
+//!< Sprite : 
+//!< パターンとパレットを出力
+//!< マップを使ってアニメーション対応をする?
+template<uint32_t W = 16, uint32_t H = 16>
+class ConverterPCESprite : public ConverterPCE<W, H>
+{
+private:
+	using Super = ConverterPCE<W, H>;
+public:
+	ConverterPCESprite(const cv::Mat& Img) : Super(Img) {}
+
+	virtual const Converter& OutputPattern(std::string_view Path) const override {
+		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+		if (!Out.bad()) {
+			Out.close();
+		}
+		return *this;
+	}
+
+	const Converter& Output(std::string_view PalettePath, std::string_view PatternPath) const {
+		OutputPattern<W, H>(PalettePath);
+		OutputPattern(PatternPath);
+		return *this;
+	}
 };
 
 class PatternPCE : public PatternBase
@@ -614,7 +751,7 @@ static void ProcessTileSet(std::string_view Name, std::string_view File, std::st
 {
 	if (!empty(File)) {
 		auto Image = cv::imread(data(File));
-		ConverterPCEImage<>(Image).Create();
+		ConverterPCEBG<>(Image).Create();
 		//PatternBase::Preview(Image);
 	}
 }
