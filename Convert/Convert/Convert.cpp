@@ -180,6 +180,7 @@ protected:
 	const cv::Mat& Image;
 };
 
+#pragma region PCE
 using PCEPalette = std::vector<uint16_t>;
 template <uint32_t W, uint32_t H>
 class PCEPattern
@@ -188,7 +189,6 @@ public:
 	uint32_t PaletteIndex;
 	std::array<uint32_t, W * H> ColorIndices;
 };
-
 template<uint32_t W, uint32_t H>
 class ConverterPCE : public Converter
 {
@@ -307,16 +307,9 @@ public:
 				Out.write(reinterpret_cast<const char*>(&Color), sizeof(Color)); //!< 先頭に透明色(ここでは0)を出力
 				Out.write(reinterpret_cast<const char*>(data(i)), size(i) * sizeof(i[0]));
 				for (auto j = size(i); j < 16; j++) {
-					Out.write(reinterpret_cast<const char*>(&Color), sizeof(Color)); //!< 空き要素分を出力
+					Out.write(reinterpret_cast<const char*>(&Color), sizeof(Color)); //!< 空き要素分(ここでは0)を出力
 				}
 			}
-			Out.close();
-		}
-		return *this;
-	}
-	virtual const Converter& OutputPattern(std::string_view Path) const override {
-		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
-		if (!Out.bad()) {
 			Out.close();
 		}
 		return *this;
@@ -349,8 +342,6 @@ protected:
 };
 
 //!< BGImage : スクロールさせない静止画向き
-//!< パターン、パレット、BAT(Background Attribute Table) を出力
-//!< BAT はパターン番号とパレット番号を含むマップ
 template<uint32_t W = 8, uint32_t H = 8>
 class ConverterPCEImage : public ConverterPCE<W, H>
 {
@@ -363,10 +354,11 @@ public:
 		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 		if (!Out.bad()) {
 			for (auto p : this->Patterns) {
-				const auto& Pal = this->Palettes[p.PaletteIndex];
+				//const auto& Pal = this->Palettes[p.PaletteIndex];
 				for (auto i = 0; i < H; ++i) {
 					for (auto j = 0; j < W; ++j) {
-						//Pal[p.ColorIndices[i * W + j]];
+						//!< #TODO
+						const auto ColIdx = p.ColorIndices[i * W + j] + 1; //!< 先頭の透明色を考慮して + 1
 					}
 				}
 			}
@@ -374,18 +366,19 @@ public:
 		}
 		return *this;
 	}
+	//!< BAT はパターン番号とパレット番号からなるマップ
 	virtual const Converter& OutputBAT(std::string_view Path) const {
 		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 		if (!Out.bad()) {
 			for (auto m = 0; m < size(this->Maps); ++m) {
 				const auto PatIdx = this->Maps[m];
-				const auto PalIdx = this->Patterns[PatIdx].PaletteIndex;
-
-				const uint16_t bat = (PalIdx << 12) | PatIdx + 256;;
-				Out.write(reinterpret_cast<const char*>(&bat), sizeof(bat));
+				const auto PalIdx = this->Patterns[PatIdx].PaletteIndex; 
+				const uint16_t BATEntry = (PalIdx << 12) | PatIdx + 256;;
+				Out.write(reinterpret_cast<const char*>(&BATEntry), sizeof(BATEntry));
 			}
 			Out.close();
 		}
+		std::cout << "BAT size = " << this->MapSize.width << " x " << this->MapSize.height << std::endl;
 		return *this;
 	}
 	
@@ -398,7 +391,6 @@ public:
 };
 
 //!< BG : スクロールさせる背景
-//!< パターン、パレット、マップを出力
 template<uint32_t W = 16, uint32_t H = 16>
 class ConverterPCEBG : public ConverterPCE<W, H>
 {
@@ -410,6 +402,26 @@ public:
 	virtual const Converter& OutputPattern(std::string_view Path) const override {
 		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 		if (!Out.bad()) {
+			for (auto p : this->Patterns) {
+				for (auto i = 0; i < H; ++i) {
+					for (auto j = 0; j < W; ++j) {
+						//!< #TODO
+						const auto ColIdx = p.ColorIndices[i * W + j] + 1; //!< 先頭の透明色を考慮して + 1
+					}
+				}
+			}
+			Out.close();
+		}
+		std::cout << "Pattern count = " << size(this->Patterns) << std::endl;
+		return *this;
+	}
+	virtual const Converter& OutputPatternPalette(std::string_view Path) const {
+		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+		if (!Out.bad()) {
+			for (auto p : this->Patterns) {
+				const uint8_t PalIdx = p.PaletteIndex << 4; //!< パターン毎のパレットインデックス (4 ビットシフトする必要がある)
+				Out.write(reinterpret_cast<const char*>(&PalIdx), sizeof(PalIdx));
+			}
 			Out.close();
 		}
 		return *this;
@@ -417,22 +429,26 @@ public:
 	virtual const Converter& OutputMap(std::string_view Path) const {
 		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 		if (!Out.bad()) {
+			for (auto m = 0; m < size(this->Maps); ++m) {
+				const uint8_t PatIdx = static_cast<uint8_t>(this->Maps[m]);
+				Out.write(reinterpret_cast<const char*>(&PatIdx), sizeof(PatIdx));
+			}
 			Out.close();
 		}
+		std::cout << "Map size = " << this->MapSize.width << " x " << this->MapSize.height << std::endl;
 		return *this;
 	}
 
-	const Converter& Output(std::string_view PalettePath, std::string_view PatternPath, std::string_view MapPath) const {
+	const Converter& Output(std::string_view PalettePath, std::string_view PatternPath, std::string_view PatternPalettePath, std::string_view MapPath) const {
 		OutputPalette<W, H>(PalettePath);
 		OutputPattern(PatternPath);
+		OutputPatternPalette(PatternPalettePath);
 		OutputMap(MapPath);
 		return *this;
 	}
 };
 
 //!< Sprite : 
-//!< パターンとパレットを出力
-//!< マップを使ってアニメーション対応をする?
 template<uint32_t W = 16, uint32_t H = 16>
 class ConverterPCESprite : public ConverterPCE<W, H>
 {
@@ -444,6 +460,14 @@ public:
 	virtual const Converter& OutputPattern(std::string_view Path) const override {
 		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 		if (!Out.bad()) {
+			for (auto p : this->Patterns) {
+				for (auto i = 0; i < H; ++i) {
+					for (auto j = 0; j < W; ++j) {
+						//!< #TODO
+						const auto ColIdx = p.ColorIndices[i * W + j] + 1; //!< 先頭の透明色を考慮して + 1
+					}
+				}
+			}
 			Out.close();
 		}
 		return *this;
@@ -455,6 +479,7 @@ public:
 		return *this;
 	}
 };
+#pragma endregion //!< PCE
 
 class PatternPCE : public PatternBase
 {
