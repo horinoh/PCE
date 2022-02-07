@@ -317,13 +317,8 @@ main()
 	load_map(x >> 4, y >> 4, MapX, MapY, SCR_TILE_W, SCR_TILE_H);
 
   while(1) {
-    KeyState = joy(JOY_PAD0);
-    /*
-    if(KeyState & JOY_LEFT) --x;
-    if(KeyState & JOY_RGHT) ++x;
-    */
+    KeyState = joy(JOY_PAD0);    
     if(KeyState & JOY_UP) { y = (y - 1) & 0xff; }
-    /*if(KeyState & JOY_DOWN) ++y;*/
 
     if(!(y & 15)) {
       --MapY;

@@ -170,10 +170,21 @@ public:
 		cv::imshow("", Image);
 		cv::waitKey(0);
 	}
-	static void Preview(const cv::Mat Image, const cv::Size& Size) {
+	static void Preview(const cv::Mat& Image, const cv::Size& Size) {
 		cv::Mat Resized;
 		cv::resize(Image, Resized, Size, 0, 0, cv::INTER_NEAREST);
 		Preview(Resized);
+	}
+	static void Grid(const cv::Mat& Image, const cv::Size& GridSize) {
+		const auto Color = cv::Scalar(0, 0, 0);
+		const auto SizeY = Image.size().height / GridSize.height;
+		for (auto i = 0; i < SizeY; ++i) {
+			cv::line(Image, cv::Point(0, i * GridSize.height), cv::Point(Image.size().width, i * GridSize.height), Color);
+		}
+		const auto SizeX = Image.size().width / GridSize.width;
+		for (auto i = 0; i < SizeX; ++i) {
+			cv::line(Image, cv::Point(i * GridSize.width, 0), cv::Point(i * GridSize.width, Image.size().height), Color);
+		}
 	}
 
 protected:
@@ -329,6 +340,8 @@ public:
 			}
 			Tile.copyTo(Res(cv::Rect((m % MapSize.width) * W, (m / MapSize.width) * H, W, H)));
 		}
+
+		Grid(Res, cv::Size(W, H));
 		Preview(Res);
 
 		return *this;
@@ -350,16 +363,25 @@ private:
 public:
 	ConverterPCEImage(const cv::Mat& Img) : Super(Img) {}
 
-	virtual const Converter& OutputPattern(std::string_view Path) const override {
+	virtual ConverterPCEImage& Create() override { Super::Create(); return *this; }
+
+	virtual const ConverterPCEImage& OutputPattern(std::string_view Path) const override {
 		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 		if (!Out.bad()) {
 			for (auto p : this->Patterns) {
-				//const auto& Pal = this->Palettes[p.PaletteIndex];
 				for (auto i = 0; i < H; ++i) {
+					uint16_t Plane01 = 0, Plane23 = 0;
 					for (auto j = 0; j < W; ++j) {
-						//!< #TODO
 						const auto ColIdx = p.ColorIndices[i * W + j] + 1; //!< 先頭の透明色を考慮して + 1
+						const auto ShiftL = 7 - j;
+						const auto ShiftU = ShiftL + 8;
+						Plane01 |= ((ColIdx & 1) ? 1 : 0) << ShiftL;
+						Plane01 |= ((ColIdx & 2) ? 1 : 0) << ShiftU;
+						Plane23 |= ((ColIdx & 4) ? 1 : 0) << ShiftL;
+						Plane23 |= ((ColIdx & 8) ? 1 : 0) << ShiftU;
 					}
+					Out.write(reinterpret_cast<const char*>(&Plane01), sizeof(Plane01));
+					Out.write(reinterpret_cast<const char*>(&Plane23), sizeof(Plane23));
 				}
 			}
 			Out.close();
@@ -367,7 +389,7 @@ public:
 		return *this;
 	}
 	//!< BAT はパターン番号とパレット番号からなるマップ
-	virtual const Converter& OutputBAT(std::string_view Path) const {
+	virtual const ConverterPCEImage& OutputBAT(std::string_view Path) const {
 		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 		if (!Out.bad()) {
 			for (auto m = 0; m < size(this->Maps); ++m) {
@@ -382,8 +404,8 @@ public:
 		return *this;
 	}
 	
-	const Converter& Output(std::string_view PalettePath, std::string_view PatternPath, std::string_view BATPath) const {
-		OutputPalette<W, H>(PalettePath);
+	const ConverterPCEImage& Output(std::string_view PalettePath, std::string_view PatternPath, std::string_view BATPath) const {
+		Super::OutputPalette(PalettePath);
 		OutputPattern(PatternPath);
 		OutputBAT(BATPath);
 		return *this;
@@ -399,15 +421,36 @@ private:
 public:
 	ConverterPCEBG(const cv::Mat& Img) : Super(Img) {}
 
-	virtual const Converter& OutputPattern(std::string_view Path) const override {
+	virtual ConverterPCEBG& Create() override { Super::Create(); return *this; }
+
+	virtual const ConverterPCEBG& OutputPattern(std::string_view Path) const override {
 		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 		if (!Out.bad()) {
 			for (auto p : this->Patterns) {
 				for (auto i = 0; i < H; ++i) {
+					uint16_t LPlane01 = 0, LPlane23 = 0;
+					uint16_t RPlane01 = 0, RPlane23 = 0;
 					for (auto j = 0; j < W; ++j) {
-						//!< #TODO
 						const auto ColIdx = p.ColorIndices[i * W + j] + 1; //!< 先頭の透明色を考慮して + 1
+						const auto ShiftL = 7 - (j % 8);
+						const auto ShiftU = ShiftL + 8;
+						if (j > 7) {
+							RPlane01 |= ((ColIdx & 1) ? 1 : 0) << ShiftL;
+							RPlane01 |= ((ColIdx & 2) ? 1 : 0) << ShiftU;
+							RPlane23 |= ((ColIdx & 4) ? 1 : 0) << ShiftL;
+							RPlane23 |= ((ColIdx & 8) ? 1 : 0) << ShiftU;
+						}
+						else {
+							LPlane01 |= ((ColIdx & 1) ? 1 : 0) << ShiftL;
+							LPlane01 |= ((ColIdx & 2) ? 1 : 0) << ShiftU;
+							LPlane23 |= ((ColIdx & 4) ? 1 : 0) << ShiftL;
+							LPlane23 |= ((ColIdx & 8) ? 1 : 0) << ShiftU;
+						}
 					}
+					Out.write(reinterpret_cast<const char*>(&LPlane01), sizeof(LPlane01));
+					Out.write(reinterpret_cast<const char*>(&LPlane23), sizeof(LPlane23));
+					Out.write(reinterpret_cast<const char*>(&RPlane01), sizeof(RPlane01));
+					Out.write(reinterpret_cast<const char*>(&RPlane23), sizeof(RPlane23));
 				}
 			}
 			Out.close();
@@ -415,7 +458,7 @@ public:
 		std::cout << "Pattern count = " << size(this->Patterns) << std::endl;
 		return *this;
 	}
-	virtual const Converter& OutputPatternPalette(std::string_view Path) const {
+	virtual const ConverterPCEBG& OutputPatternPalette(std::string_view Path) const {
 		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 		if (!Out.bad()) {
 			for (auto p : this->Patterns) {
@@ -426,7 +469,7 @@ public:
 		}
 		return *this;
 	}
-	virtual const Converter& OutputMap(std::string_view Path) const {
+	virtual const ConverterPCEBG& OutputMap(std::string_view Path) const {
 		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 		if (!Out.bad()) {
 			for (auto m = 0; m < size(this->Maps); ++m) {
@@ -439,8 +482,8 @@ public:
 		return *this;
 	}
 
-	const Converter& Output(std::string_view PalettePath, std::string_view PatternPath, std::string_view PatternPalettePath, std::string_view MapPath) const {
-		OutputPalette<W, H>(PalettePath);
+	const ConverterPCEBG& Output(std::string_view PalettePath, std::string_view PatternPath, std::string_view PatternPalettePath, std::string_view MapPath) const {
+		Super::OutputPalette(PalettePath);
 		OutputPattern(PatternPath);
 		OutputPatternPalette(PatternPalettePath);
 		OutputMap(MapPath);
@@ -457,24 +500,36 @@ private:
 public:
 	ConverterPCESprite(const cv::Mat& Img) : Super(Img) {}
 
-	virtual const Converter& OutputPattern(std::string_view Path) const override {
+	virtual ConverterPCESprite& Create() override { Super::Create(); return *this; }
+
+	virtual const ConverterPCESprite& OutputPattern(std::string_view Path) const override {
 		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 		if (!Out.bad()) {
 			for (auto p : this->Patterns) {
 				for (auto i = 0; i < H; ++i) {
+					uint16_t Plane0 = 0, Plane1 = 0, Plane2 = 0, Plane3 = 0;
 					for (auto j = 0; j < W; ++j) {
-						//!< #TODO
 						const auto ColIdx = p.ColorIndices[i * W + j] + 1; //!< 先頭の透明色を考慮して + 1
+						const auto Shift = 15 - j;
+						Plane0 |= ((ColIdx & 1) ? 1 : 0) << Shift;
+						Plane1 |= ((ColIdx & 2) ? 1 : 0) << Shift;
+						Plane2 |= ((ColIdx & 4) ? 1 : 0) << Shift;
+						Plane3 |= ((ColIdx & 8) ? 1 : 0) << Shift;
 					}
+					Out.write(reinterpret_cast<const char*>(&Plane0), sizeof(Plane0));
+					Out.write(reinterpret_cast<const char*>(&Plane1), sizeof(Plane1));
+					Out.write(reinterpret_cast<const char*>(&Plane2), sizeof(Plane2));
+					Out.write(reinterpret_cast<const char*>(&Plane3), sizeof(Plane3));
 				}
 			}
+			std::cout << "Sprite size = " << W << " x " << H << " x " << size(this->Patterns) << std::endl;
 			Out.close();
 		}
 		return *this;
 	}
 
-	const Converter& Output(std::string_view PalettePath, std::string_view PatternPath) const {
-		OutputPattern<W, H>(PalettePath);
+	const ConverterPCESprite& Output(std::string_view PalettePath, std::string_view PatternPath) const {
+		Super::OutputPattern(PalettePath);
 		OutputPattern(PatternPath);
 		return *this;
 	}
@@ -768,23 +823,26 @@ static void ProcessPalette(std::string_view Name, std::string_view File)
 {
 	if (!empty(File)) {
 		auto Image = cv::imread(data(File));
-		ConverterPCEImage<>(Image).Create();
-		//PatternBase::Preview(Image);
+		//ConverterPCEImage<>(Image).Create().Output("Palette.bin", "Pattern.bin", "BAT.bin");
 	}
 }
-static void ProcessTileSet(std::string_view Name, std::string_view File, std::string_view Compression, std::string_view Option)
+static void ProcessTileSet(std::string_view Name, std::string_view File, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] std::string_view Option)
 {
 	if (!empty(File)) {
 		auto Image = cv::imread(data(File));
-		ConverterPCEBG<>(Image).Create();
-		//PatternBase::Preview(Image);
+		ConverterPCEBG<>(Image).Create().Output("Palette.bin", "Pattern.bin", "PatternPalette.bin", "Map.bin");
 	}
 }
-static void ProcessMap(std::string_view Name, std::string_view File, std::string_view TileSet, std::string_view Compression, const uint32_t Mapbase)
+static void ProcessMap(std::string_view Name, std::string_view File, std::string_view TileSet, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] const uint32_t Mapbase)
 {
 }
-static void ProcessSprite(std::string_view Name, std::string_view File, const uint32_t Width, const uint32_t Height, std::string_view Compression, const uint32_t Time, std::string_view Collision, std::string_view Opt, const uint32_t Iteration)
+static void ProcessSprite(std::string_view Name, std::string_view File, const uint32_t Width, const uint32_t Height, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] const uint32_t Time, [[maybe_unused]] std::string_view Collision, [[maybe_unused]] std::string_view Option, [[maybe_unused]] const uint32_t Iteration)
 {
+	//!< 16x16, 16x32, 16x64, 32x16, 32x32, 32x64
+	if (!empty(File)) {
+		auto Image = cv::imread(data(File));
+		ConverterPCESprite<>(Image).Create().Output("Palette.bin", "Pattern.bin");
+	}
 }
 int main(int argc, char* argv[])
 {

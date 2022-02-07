@@ -2,54 +2,46 @@
 
 #include "..\define.h"
 
-#incbin(Palette, "BG_Palette.bin")
-#incbin(Pattern, "BG_Pattern.bin")
-#incbin(BAT, "BG_Bat.bin")
+#incbin(Palette, "Palette.bin");
+#incbin(Pattern, "Pattern.bin");
+#incbin(PatternPalette, "PatternPalette.bin");
+#incbin(Map, "Map.bin");
 
-#define MAP_WIDTH  48
-#define MAP_HEIGHT 12
-const char Map[] = {
-	5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5, 5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5, 5,5,5,5,6,5,5,5,5,5,5,5,5,5,5,5,
-	5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5, 5,5,5,5,5,5,5,4,5,4,5,4,5,4,5,4, 4,4,5,5,4,5,5,5,5,5,5,5,5,5,5,5,
-	5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5, 5,5,5,5,5,5,5,4,6,4,5,4,5,4,5,4, 5,5,5,5,4,5,5,5,5,5,5,5,5,5,5,5,
-	5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5, 5,5,5,5,5,5,5,4,4,4,5,4,5,4,5,4, 5,5,5,5,4,5,5,5,5,5,5,5,5,5,5,5,
-	5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5, 5,5,5,5,5,5,5,4,5,4,5,4,5,4,5,4, 6,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,
-	5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5, 5,5,5,5,5,5,5,4,5,4,5,4,4,4,5,4, 4,4,5,5,4,5,6,5,5,5,5,5,5,5,5,5,
-	5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5, 5,5,5,5,5,0,8,2,2,2,2,2,2,2,2,2, 2,2,2,0,0,0,2,2,0,5,5,5,5,5,5,5,
-	5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,6, 5,7,7,7,7,0,1,1,1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,0,5,5,5,5,5,5,6,
-	2,5,5,5,5,5,6,5,5,5,5,5,5,5,5,8, 2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,0,9,9,9,9,9,8,2,
-	1,5,7,7,2,2,2,0,0,8,9,9,9,9,9,0, 1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,3,3,3,3,3,0,1,
-	1,2,2,2,1,1,1,1,1,0,3,3,3,3,3,0, 1,1,1,1,1,1,1,1,1,0,3,3,3,3,3,3, 3,3,3,3,3,3,3,3,3,3,3,3,3,3,0,1,
-	1,1,1,1,1,1,1,1,1,0,3,3,3,3,3,0, 1,1,1,1,1,1,1,1,1,0,3,3,3,3,3,3, 3,3,3,3,3,3,3,3,3,3,3,3,3,3,0,1
-};
+#define MAP_TILE_W 32
+#define MAP_TILE_H 16
+
+#define SCR_TILE_W (SCREEN_WIDTH>>4)
+#define SCR_TILE_H (SCREEN_HEIGHT>>4)
+
+#define TILE_VRAM 0x5000
 
 main()
-{
-  	u16 i;
+{  
+  int x, y;
+  int MapX, MapY;
+  u8 KeyState;
+  x = y = 0;
+  MapX = MapY = 0;
 
-  	/*
-  	Virtual screnn size
-  	SCR_SIZE_32x32, SCR_SIZE_64x32, SCR_SIZE_128x32, SCR_SIZE_32x64, SCR_SIZE_64x64, SCR_SIZE_128x64
-  	(Default is SCR_SIZE_64x32)
-  	*/
-  	set_screen_size(SCR_SIZE_64x32);
+  set_map_data(Map, MAP_TILE_W, MAP_TILE_H);  
+  set_tile_data(Pattern, 3, PatternPalette);
 
-	set_bgpal(0, Palette, 1);
+  load_tile(TILE_VRAM);
+  load_palette(0, Palette, 1);
+  load_map(x >> 4, y >> 4, MapX, MapY, SCR_TILE_W, SCR_TILE_H);
 
-	/*
-  	set_tile_data(Tile, 10, TilePallets);
-  	load_tile(0x1000);
-  	*/
-	load_vram(0x2000, Pattern, 32*4*16);
+  while(1) {
+    KeyState = joy(JOY_PAD0);
+    if(KeyState & JOY_UP) { y = (y - 1) & 0xff; }
 
-	load_bat(0x600, BAT, 32, 4);
+    if(!(y & 15)) {
+      --MapY;
+      if(MapY < 0) { MapY += MAP_TILE_H; }
+      load_map(x >> 4, (y >> 4) - 1, MapX, MapY - 1, SCR_TILE_W, 1);
+    }
 
-	/*
-	set_map_data(Map, MAP_WIDTH, MAP_HEIGHT);  
-  	load_map(0, 0, 0, 0, 17, 12);
-	*/
-
-  	while(1){
-    	vsync();
-  	}
+    scroll(WIN0, x, y, 0, SCREEN_HEIGHT - 1, SCR_BG_ON);
+    
+    vsync();
+  }
 }
