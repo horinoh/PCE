@@ -58,7 +58,6 @@ static void ColorReduction(cv::Mat& Dst, const cv::Mat& Image, const uint32_t Co
 
 	//!< 各ピクセル値を属するクラスタの中心値で置き換え
 	Dst = cv::Mat(Image.size(), Image.type());
-	//cv::Mat Tmp(Image.size(), Image.type());
 	auto It = Dst.begin<cv::Vec3b>();
 	for (auto i = 0; It != Dst.end<cv::Vec3b>(); ++It, ++i) {
 		const auto Color = Centers.at<cv::Vec3f>(Clusters(i), 0);
@@ -66,10 +65,7 @@ static void ColorReduction(cv::Mat& Dst, const cv::Mat& Image, const uint32_t Co
 		(*It)[1] = cv::saturate_cast<uchar>(Color[1]); //!< G
 		(*It)[2] = cv::saturate_cast<uchar>(Color[2]); //!< R
 	}
-
-	//Dst = Tmp.clone();
 }
-
 
 class Converter
 {
@@ -692,43 +688,6 @@ int main(int argc, char* argv[])
 			}
 		}
 	}
-
-	//!< リサイズと減色は予めやってもらう体とする
-#if false
-	//!< リサイズ
-	//cv::resize(Image, Image, cv::Size(16, 16), 0, 0, cv::INTER_NEAREST);
-	cv::resize(Image, Image, cv::Size(8, 8), 0, 0, cv::INTER_NEAREST);
-
-	//!< 減色
-	{
-		//!< 何色に減色するか
-		const int ColorCount = 16;
-
-		//!< 1行の行列となるように変形
-		cv::Mat Points;
-		Image.convertTo(Points, CV_32FC3);
-		Points = Points.reshape(3, Image.rows * Image.cols);
-
-		//!< k-means クラスタリング
-		cv::Mat_<int> Clusters(Points.size(), CV_32SC1);
-		cv::Mat Centers;
-		cv::kmeans(Points, ColorCount, Clusters, cv::TermCriteria(cv::TermCriteria::Type::EPS | cv::TermCriteria::Type::MAX_ITER, 10, 1.0), 1, cv::KmeansFlags::KMEANS_PP_CENTERS, Centers);
-
-		//!< 各ピクセル値を属するクラスタの中心値で置き換え
-		cv::Mat Tmp(Image.size(), Image.type());
-		auto It = Tmp.begin<cv::Vec3b>();
-		for (auto i = 0; It != Tmp.end<cv::Vec3b>(); ++It, ++i) {
-			const auto Color = Centers.at<cv::Vec3f>(Clusters(i), 0);
-			(*It)[0] = cv::saturate_cast<uchar>(Color[0]); //!< B
-			(*It)[1] = cv::saturate_cast<uchar>(Color[1]); //!< G
-			(*It)[2] = cv::saturate_cast<uchar>(Color[2]); //!< R
-		}
-
-		Image = Tmp.clone();
-	}
-	//!< リサイズ、減色後の結果を(拡大表示で)プレビュー 
-	Preview(Image, cv::Size(256, 256));
-#endif
 }
 
 // Run program: Ctrl + F5 or Debug > Start Without Debugging menu
