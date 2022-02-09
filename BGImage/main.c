@@ -274,8 +274,7 @@ const u16 BAT[] = {
 main()
 {
   /* Not suit for scroll, suit for still image */
-  /* BG display range is 32 x 28 cell (256 x 224 pixel) */
-  load_background(Pattern, Palette, BAT, 32, 28);
+  load_background(Pattern, Palette, BAT, SCREEN_CELLS_W, SCREEN_CELLS_H);
 
   while(1){
     vsync();

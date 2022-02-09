@@ -3,6 +3,8 @@
 
 #define SCREEN_WIDTH 256
 #define SCREEN_HEIGHT 224
+#define SCREEN_CELLS_W 32 /* SCREEN_WIDTH >> 3 */
+#define SCREEN_CELLS_H 28 /* SCREEN_HEIGHT >> 3 */
 
 /* Window */
 #define WIN0 0
