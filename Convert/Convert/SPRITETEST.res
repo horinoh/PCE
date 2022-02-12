@@ -1,0 +1,2 @@
+PALETTE PaletteSprite "SPRITETEST.png"
+SPRITE PatternSprite "SPRITETEST.png" 2 2 FAST 5 BOX

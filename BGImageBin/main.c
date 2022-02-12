@@ -2,8 +2,8 @@
 
 #include "..\define.h"
 
-#incbin(Pattern, "Pattern.bin");
-#incbin(Palette, "Palette.bin");
+#incbin(Pattern, "PatternIMAGE.bin");
+#incbin(Palette, "PaletteIMAGE.bin");
 #incbin(BAT, "BAT.bin");
 
 main()
