@@ -74,7 +74,17 @@ class Converter
 public:
 	Converter(const cv::Mat& Img) : Image(Img) {}
 
-	virtual Converter& Create() { return *this; }
+	virtual Converter& Create() {
+		CreateMap();
+		CreatePalette();
+		OptimizePalette();
+		CreatePattern();
+		return *this;
+	}
+	virtual Converter& CreateMap() { CCPatterns.clear(); return *this; }
+	virtual Converter& CreatePalette() { return *this; }
+	virtual Converter& OptimizePalette() { return *this; }
+	virtual Converter& CreatePattern() { return *this; }
 
 	virtual const Converter& OutputPalette(std::string_view Path) const { return *this; }
 	virtual const Converter& OutputPattern(std::string_view Path) const { return *this; }
@@ -85,6 +95,7 @@ public:
 
 protected:
 	const cv::Mat& Image;
+	std::vector<cv::Mat> CCPatterns;
 };
 
 #pragma region PCE
@@ -96,6 +107,7 @@ namespace PCE
 	static cv::Vec3b FromPCEColor(const uint16_t& Color) { return cv::Vec3b((Color & 0x7) << 5, ((Color & (0x7 << 6)) >> 6) << 5, ((Color & (0x7 << 3)) >> 3) << 5); }
 
 	using PCEPalette = std::vector<uint16_t>;
+
 	template <uint32_t W, uint32_t H>
 	class PCEPattern
 	{
@@ -103,6 +115,7 @@ namespace PCE
 		uint32_t PaletteIndex;
 		std::array<uint8_t, W * H> ColorIndices;
 	};
+
 	template<uint8_t W, uint8_t H>
 	class ConverterPCE : public Converter
 	{
@@ -111,9 +124,9 @@ namespace PCE
 	public:
 		ConverterPCE(const cv::Mat& Img) : Super(Img), MapSize(Image.cols / W, Image.rows / H) {}
 
-		virtual Converter& Create() override {
-#pragma region MAP
-			std::vector<cv::Mat> CCPatterns; //!< (カラーコンポーネント表現の)パターン
+		virtual ConverterPCE& CreateMap() override {
+			Super::CreateMap();
+
 			Maps.clear();
 			for (auto i = 0; i < MapSize.height; ++i) {
 				for (auto j = 0; j < MapSize.width; ++j) {
@@ -139,7 +152,7 @@ namespace PCE
 						if (0 == cv::sum(Result)[0]) { return true; }
 
 						return false;
-					});
+						});
 					if (end(CCPatterns) != It) {
 						Maps.emplace_back(static_cast<uint32_t>(std::distance(begin(CCPatterns), It)));
 					}
@@ -150,17 +163,16 @@ namespace PCE
 					}
 				}
 			}
-#pragma endregion
-
-#pragma region PALETTE
-			//!< パターン毎にパレットを作る
-			std::vector<uint32_t> PaletteIndices;
+			return *this;
+		}
+		virtual ConverterPCE& CreatePalette() override {
+			PaletteIndices.clear();
 			Palettes.clear();
-			for (auto p : CCPatterns) {
+			for (auto pat : CCPatterns) {
 				PCEPalette Pal;
-				for (auto i = 0; i < p.rows; ++i) {
-					for (auto j = 0; j < p.cols; ++j) {
-						const auto Color = ToPCEColor(p.ptr<cv::Vec3b>(i)[j]);
+				for (auto i = 0; i < pat.rows; ++i) {
+					for (auto j = 0; j < pat.cols; ++j) {
+						const auto Color = ToPCEColor(pat.ptr<cv::Vec3b>(i)[j]);
 						if (end(Pal) == std::ranges::find(Pal, Color)) {
 							Pal.emplace_back(Color);
 						}
@@ -181,9 +193,9 @@ namespace PCE
 					PaletteIndices.emplace_back(static_cast<uint32_t>(std::distance(begin(Palettes), It)));
 				}
 			}
-
-#pragma region OPTIMIZE_PALETTE
-			//!< パレットをまとめる
+			return *this;
+		}
+		virtual ConverterPCE& OptimizePalette() override {
 			while ([&]() {
 				for (auto i = 0; i < size(Palettes); ++i) {
 					for (auto j = i + 1; j < size(Palettes); ++j) {
@@ -211,7 +223,7 @@ namespace PCE
 				std::ranges::sort(SortUnique);
 				const auto [B, E] = std::ranges::unique(SortUnique);
 				SortUnique.erase(B, E);
-				for (auto i = 0; i < size(SortUnique); ++i) { 
+				for (auto i = 0; i < size(SortUnique); ++i) {
 					std::ranges::replace(PaletteIndices, SortUnique[i], i);
 				}
 			}
@@ -220,11 +232,9 @@ namespace PCE
 				const auto [B, E] = std::ranges::remove_if(Palettes, [](const PCEPalette& rhs) { return empty(rhs); });
 				Palettes.erase(B, E);
 			}
-#pragma endregion
-#pragma endregion
-
-#pragma region PATTERN
-			//!< 使用パレット番号と、(インデックスカラー表現の)パターンを格納
+			return *this;
+		}
+		virtual ConverterPCE& CreatePattern() override {
 			Patterns.clear();
 			for (auto p = 0; p < size(CCPatterns); ++p) {
 				const auto& Pat = CCPatterns[p];
@@ -237,8 +247,6 @@ namespace PCE
 					}
 				}
 			}
-#pragma endregion
-
 			return *this;
 		}
 
@@ -264,6 +272,7 @@ namespace PCE
 
 		//!< 復元して表示してみる (パレットチェック用)
 		virtual const Converter& RestorePalette() const override {
+#ifdef _DEBUG
 			cv::Mat Res(cv::Size(15, static_cast<int>(size(Palettes))), Image.type());
 			for (auto i = 0; i < size(Palettes); ++i) {
 				for (auto j = 0; j < 15; ++j) {
@@ -271,11 +280,12 @@ namespace PCE
 				}
 			}
 			Preview("Palette", Res, Res.size() * 50);
-			
+#endif
 			return *this;
 		}
 		//!< 復元して表示してみる (パターンチェック用)
 		virtual const Converter& RestorePattern() const override {
+#ifdef _DEBUG
 			const auto PatCount = static_cast<int>(size(Patterns));
 			cv::Mat Res(cv::Size(16 * W, (PatCount / 16 + 1) * H), Image.type());
 			for (auto p = 0; p < size(Patterns); ++p) {
@@ -292,11 +302,12 @@ namespace PCE
 
 			DrawGrid(Res, cv::Size(W, H));
 			Preview("Pattern", Res, Res.size() * 5);
-
+#endif
 			return *this;
 		}
 		//!< 復元して表示してみる (マップチェック用)
 		virtual const Converter& RestoreMap() const override {
+#ifdef _DEBUG
 			cv::Mat Res(Image.size(), Image.type());
 			for (auto m = 0; m < size(Maps); ++m) {
 				const auto& Pat = Patterns[Maps[m]];
@@ -312,12 +323,13 @@ namespace PCE
 
 			DrawGrid(Res, cv::Size(W, H));
 			Preview("Map", Res, Res.size() * 3);
-
+#endif
 			return *this;
 		}
 
 	protected:
 		cv::Size MapSize;
+		std::vector<uint32_t> PaletteIndices;
 		std::vector<PCEPalette> Palettes;
 		std::vector<PCEPattern<W, H>> Patterns;
 		std::vector<uint16_t> Maps;
@@ -374,13 +386,6 @@ namespace PCE
 			}
 			return *this;
 		}
-
-		const ImageConverter& Output(std::string_view PalettePath, std::string_view PatternPath, std::string_view BATPath) const {
-			Super::OutputPalette(PalettePath);
-			OutputPattern(PatternPath);
-			OutputBAT(BATPath);
-			return *this;
-		}
 	};
 
 	//!< BG : スクロールさせる背景
@@ -399,33 +404,36 @@ namespace PCE
 			std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 			if (!Out.bad()) {
 				for (auto p : this->Patterns) {
-					//for (auto pl = 0; pl < 2; ++pl) {
-					for (auto i = 0; i < H; ++i) {
-							uint16_t LPlane01 = 0, LPlane23 = 0;
-							uint16_t RPlane01 = 0, RPlane23 = 0;
-							for (auto j = 0; j < W; ++j) {
+					for (auto pl = 0; pl < 2; ++pl) {
+						for (auto i = 0; i < H; ++i) {
+							const auto W2 = W >> 1;
+							//!< L
+							uint16_t Plane = 0;
+							for (auto j = 0; j < W2; ++j) {
 								const auto ColIdx = p.ColorIndices[i * W + j] + 1; //!< 先頭の透明色を考慮して + 1
-								const auto ShiftL = 7 - (j % 8);
+								const auto ShiftL = 7 - j;
 								const auto ShiftU = ShiftL + 8;
-								if (j > 7) {
-									RPlane01 |= ((ColIdx & 1) ? 1 : 0) << ShiftL;
-									RPlane01 |= ((ColIdx & 2) ? 1 : 0) << ShiftU;
-									RPlane23 |= ((ColIdx & 4) ? 1 : 0) << ShiftL;
-									RPlane23 |= ((ColIdx & 8) ? 1 : 0) << ShiftU;
-								}
-								else {
-									LPlane01 |= ((ColIdx & 1) ? 1 : 0) << ShiftL;
-									LPlane01 |= ((ColIdx & 2) ? 1 : 0) << ShiftU;
-									LPlane23 |= ((ColIdx & 4) ? 1 : 0) << ShiftL;
-									LPlane23 |= ((ColIdx & 8) ? 1 : 0) << ShiftU;
-								}
+								const auto MaskL = 1 << ((pl << 1) + 0);
+								const auto MaskU = 1 << ((pl << 1) + 1);
+								Plane |= ((ColIdx & MaskL) ? 1 : 0) << ShiftL;
+								Plane |= ((ColIdx & MaskU) ? 1 : 0) << ShiftU;
 							}
-							Out.write(reinterpret_cast<const char*>(&LPlane01), sizeof(LPlane01));
-							Out.write(reinterpret_cast<const char*>(&LPlane23), sizeof(LPlane23));
-							Out.write(reinterpret_cast<const char*>(&RPlane01), sizeof(RPlane01));
-							Out.write(reinterpret_cast<const char*>(&RPlane23), sizeof(RPlane23));
+							Out.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
+
+							//!< R
+							Plane = 0;
+							for (auto j = 0; j < W2; ++j) {
+								const auto ColIdx = p.ColorIndices[i * W + j + W2] + 1; //!< 先頭の透明色を考慮して + 1
+								const auto ShiftL = 7 - j;
+								const auto ShiftU = ShiftL + 8;
+								const auto MaskL = 1 << ((pl << 1) + 0);
+								const auto MaskU = 1 << ((pl << 1) + 1);
+								Plane |= ((ColIdx & MaskL) ? 1 : 0) << ShiftL;
+								Plane |= ((ColIdx & MaskU) ? 1 : 0) << ShiftU;
+							}
+							Out.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
 						}
-					//}
+					}
 				}
 				Out.close();
 			}
@@ -454,14 +462,6 @@ namespace PCE
 			}
 			return *this;
 		}
-
-		const BGConverter& Output(std::string_view PalettePath, std::string_view PatternPath, std::string_view PatternPalettePath, std::string_view MapPath) const {
-			Super::OutputPalette(PalettePath);
-			OutputPattern(PatternPath);
-			OutputPatternPalette(PatternPalettePath);
-			OutputMap(MapPath);
-			return *this;
-		}
 	};
 
 	//!< スプライト
@@ -477,7 +477,7 @@ namespace PCE
 
 		virtual const SpriteConverter& OutputPattern(std::string_view Path) const override {
 			std::cout << "\tPattern count = " << size(this->Patterns) << std::endl;
-			std::cout << "\tSprite size = " << W << " x " << H << std::endl;
+			std::cout << "\tSprite size = " << static_cast<uint16_t>(W) << " x " << static_cast<uint16_t>(H) << std::endl;
 			std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 			if (!Out.bad()) {
 				for (auto pat : this->Patterns) {
@@ -489,7 +489,8 @@ namespace PCE
 							for (auto j = 0; j < W; ++j) {
 								const auto ColIdx = pat.ColorIndices[i * W + j] + 1; //!< 先頭の透明色を考慮して + 1
 								const auto Shift = 15 - j;
-								Plane |= ((ColIdx & (1 << pl)) ? 1 : 0) << Shift;
+								const auto Mask = 1 << pl;
+								Plane |= ((ColIdx & Mask) ? 1 : 0) << Shift;
 							}
 							Out.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
 							//std::cout << "\t0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane << "," << std::endl;
@@ -498,12 +499,6 @@ namespace PCE
 				}	
 				Out.close();
 			}
-			return *this;
-		}
-
-		const SpriteConverter& Output(std::string_view PalettePath, std::string_view PatternPath) const {
-			Super::OutputPattern(PalettePath);
-			OutputPattern(PatternPath);
 			return *this;
 		}
 	};
@@ -691,7 +686,6 @@ static void ProcessSprite(std::string_view Name, std::string_view File, const ui
 		default: break;
 		}
 #pragma endregion
-		//PCE::SpriteConverter<48, 48>(Image).Create().Output("Palette.bin", "Pattern.bin").RestorePattern();
 	}
 }
 int main(int argc, char* argv[])
