@@ -185,14 +185,17 @@ PutSpritesRandom()
   /* Free memory range is [0x800, 0xfff] and [0x5000, 0x7eff], here use latter */
 #define SPR_VRAM 0x4000/*0x6000*/
 
+#define SPR_PAL_COUNT 1
+#define SPR_PAT_COUNT 11
+
 main()
 {
   u8 KeyState;
   u8 i;
 
   /* To VRAM */
-  load_vram(SPR_VRAM, Pattern, SPR_WORDSIZE_16x16);
-  set_sprpal(0, Palette, 1);
+  load_vram(SPR_VRAM, Pattern, SPR_WORDSIZE_16x16 * SPR_PAT_COUNT);
+  set_sprpal(0, Palette, SPR_PAL_COUNT);
 
   /* Initialize Sprite Attribute Table */
   init_satb();
@@ -203,7 +206,7 @@ main()
     /* Size(16x16, 16x32, 16x64, 32x16, 32x32, 32x64), Flip settings */
     spr_ctrl(SIZE_MAS | FLIP_MAS, SZ_16x16 | NO_FLIP);
     /* Select pattern */
-    spr_pattern(SPR_VRAM);
+    spr_pattern(SPR_VRAM + 0 * SPR_WORDSIZE_16x16);
     /* Select palette [0, 15] */
     spr_pal(0);
     /* Priority [0, 1] */

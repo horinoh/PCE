@@ -81,7 +81,47 @@ public:
 		CreatePattern();
 		return *this;
 	}
-	virtual Converter& CreateMap() { CCPatterns.clear(); return *this; }
+
+	void PatternSegmentation(const cv::Size& MapSize, const cv::Size& PatSize) {
+		CCPatterns.clear();
+		Maps.clear();
+		for (auto i = 0; i < MapSize.height; ++i) {
+			for (auto j = 0; j < MapSize.width; ++j) {
+				const auto NoFlip = Image(cv::Rect(j * PatSize.width, i * PatSize.height, PatSize.width, PatSize.height));
+				cv::Mat VFlip, HFlip, VHFlip;
+				cv::flip(NoFlip, VFlip, 0);
+				cv::flip(NoFlip, HFlip, 1);
+				cv::flip(NoFlip, VHFlip, -1);
+
+				//!< 反転することにより同じパターンとなるか?
+				const auto It = std::ranges::find_if(CCPatterns, [&](const cv::Mat& rhs) {
+					cv::Mat Result;
+					cv::bitwise_xor(NoFlip, rhs, Result);
+					if (0 == cv::sum(Result)[0]) { return true; }
+
+					cv::bitwise_xor(VFlip, rhs, Result);
+					if (0 == cv::sum(Result)[0]) { return true; }
+
+					cv::bitwise_xor(HFlip, rhs, Result);
+					if (0 == cv::sum(Result)[0]) { return true; }
+
+					cv::bitwise_xor(VHFlip, rhs, Result);
+					if (0 == cv::sum(Result)[0]) { return true; }
+
+					return false;
+					});
+				if (end(CCPatterns) != It) {
+					Maps.emplace_back(static_cast<uint32_t>(std::distance(begin(CCPatterns), It)));
+				}
+				else {
+					//!< #TODO 反転情報も覚えておく必要がある
+					Maps.emplace_back(static_cast<uint32_t>(size(CCPatterns)));
+					CCPatterns.emplace_back(NoFlip);
+				}
+			}
+		}
+	}
+	virtual Converter& CreateMap() { return *this; }
 	virtual Converter& CreatePalette() { return *this; }
 	virtual Converter& OptimizePalette() { return *this; }
 	virtual Converter& CreatePattern() { return *this; }
@@ -96,6 +136,7 @@ public:
 protected:
 	const cv::Mat& Image;
 	std::vector<cv::Mat> CCPatterns;
+	std::vector<uint16_t> Maps;
 };
 
 #pragma region PCE
@@ -125,44 +166,7 @@ namespace PCE
 		ConverterPCE(const cv::Mat& Img) : Super(Img), MapSize(Image.cols / W, Image.rows / H) {}
 
 		virtual ConverterPCE& CreateMap() override {
-			Super::CreateMap();
-
-			Maps.clear();
-			for (auto i = 0; i < MapSize.height; ++i) {
-				for (auto j = 0; j < MapSize.width; ++j) {
-					const auto NoFlip = Image(cv::Rect(j * W, i * H, W, H));
-					cv::Mat VFlip, HFlip, VHFlip;
-					cv::flip(NoFlip, VFlip, 0);
-					cv::flip(NoFlip, HFlip, 1);
-					cv::flip(NoFlip, VHFlip, -1);
-
-					//!< 反転することにより同じパターンとなるか?
-					const auto It = std::ranges::find_if(CCPatterns, [&](const cv::Mat& rhs) {
-						cv::Mat Result;
-						cv::bitwise_xor(NoFlip, rhs, Result);
-						if (0 == cv::sum(Result)[0]) { return true; }
-
-						cv::bitwise_xor(VFlip, rhs, Result);
-						if (0 == cv::sum(Result)[0]) { return true; }
-
-						cv::bitwise_xor(HFlip, rhs, Result);
-						if (0 == cv::sum(Result)[0]) { return true; }
-
-						cv::bitwise_xor(VHFlip, rhs, Result);
-						if (0 == cv::sum(Result)[0]) { return true; }
-
-						return false;
-						});
-					if (end(CCPatterns) != It) {
-						Maps.emplace_back(static_cast<uint32_t>(std::distance(begin(CCPatterns), It)));
-					}
-					else {
-						//!< #TODO 反転情報も覚えておく必要がある
-						Maps.emplace_back(static_cast<uint32_t>(size(CCPatterns)));
-						CCPatterns.emplace_back(NoFlip);
-					}
-				}
-			}
+			PatternSegmentation(MapSize, cv::Size(W, H));
 			return *this;
 		}
 		virtual ConverterPCE& CreatePalette() override {
@@ -332,7 +336,7 @@ namespace PCE
 		std::vector<uint32_t> PaletteIndices;
 		std::vector<PCEPalette> Palettes;
 		std::vector<PCEPattern<W, H>> Patterns;
-		std::vector<uint16_t> Maps;
+		//std::vector<uint16_t> Maps;
 	};
 
 	//!< イメージ : スクロールさせない静止画向き

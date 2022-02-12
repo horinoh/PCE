@@ -2,10 +2,10 @@
 
 #include "..\define.h"
 
-#incbin(Palette, "Palette.bin");
-#incbin(Pattern, "Pattern.bin");
-#incbin(PatternPalette, "PatternPalette.bin");
-#incbin(Map, "Map.bin");
+#incbin(Palette, "PaletteBG.bin");
+#incbin(Pattern, "PatternBG.bin");
+#incbin(PatternPalette, "PatternBG.pal.bin");
+#incbin(Map, "MapBG.bin");
 
 #define MAP_TILE_W 32
 #define MAP_TILE_H 16
@@ -15,6 +15,12 @@
 
 #define TILE_VRAM 0x5000
 
+/* Set convert result here */
+#define BG_MAP_W 4
+#define BG_MAP_H 4
+#define BG_PAT_COUNT 16
+#define BG_PAL_COUNT 1
+
 main()
 {  
   int x, y;
@@ -23,11 +29,12 @@ main()
   x = y = 0;
   MapX = MapY = 0;
 
-  set_map_data(Map, MAP_TILE_W, MAP_TILE_H);  
-  set_tile_data(Pattern, 3, PatternPalette);
+  /*set_map_data(Map, MAP_TILE_W, MAP_TILE_H);  */
+  set_map_data(Map, BG_MAP_W, BG_MAP_H);  
+  set_tile_data(Pattern, BG_PAT_COUNT, PatternPalette);
 
   load_tile(TILE_VRAM);
-  load_palette(0, Palette, 1);
+  load_palette(0, Palette, BG_PAL_COUNT);
   load_map(x >> 4, y >> 4, MapX, MapY, SCR_TILE_W, SCR_TILE_H);
 
   while(1) {

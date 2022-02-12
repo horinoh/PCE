@@ -1,8 +1,8 @@
 #include "huc.h"
 #include "..\define.h"
 
-#incbin(Palette, "PaletteSprite.bin")
-#incbin(Pattern, "PatternSprite.bin")
+#incbin(Palette, "PaletteSPRITE.bin")
+#incbin(Pattern, "PatternSPRITE.bin")
 
 PutSpritesRandom()
 {
@@ -16,20 +16,24 @@ PutSpritesRandom()
 
 #define SPR_VRAM 0x6000
 
+/* Set convert result here */
+#define SPR_PAL_COUNT 1
+#define SPR_PAT_COUNT 14
+
 main()
 {
   u8 KeyState;
   u8 i;
-
-  load_vram(SPR_VRAM, Pattern, SPR_WORDSIZE_16x16);
-  set_sprpal(0, Palette, 1);
+  
+  load_vram(SPR_VRAM, Pattern, SPR_WORDSIZE_16x16 * SPR_PAT_COUNT);
+  set_sprpal(0, Palette, SPR_PAL_COUNT);
 
   init_satb();
 
   for(i = 0;i < SPR_MAX;++i) {
     spr_set(i);
     spr_ctrl(SIZE_MAS | FLIP_MAS, SZ_16x16 | NO_FLIP);
-    spr_pattern(SPR_VRAM);
+    spr_pattern(SPR_VRAM + (SPR_SIZE_16x16 / 16) * (i % SPR_PAT_COUNT));
     spr_pal(0);
     spr_pri(1);
   }
