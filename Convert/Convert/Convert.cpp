@@ -404,10 +404,11 @@ namespace PCE
 			std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 			if (!Out.bad()) {
 				for (auto p : this->Patterns) {
+					const auto W2 = W >> 1;
+					const auto H2 = H >> 1;
+					//!< LT
 					for (auto pl = 0; pl < 2; ++pl) {
-						for (auto i = 0; i < H; ++i) {
-							const auto W2 = W >> 1;
-							//!< L
+						for (auto i = 0; i < H2; ++i) {
 							uint16_t Plane = 0;
 							for (auto j = 0; j < W2; ++j) {
 								const auto ColIdx = p.ColorIndices[i * W + j] + 1; //!< 先頭の透明色を考慮して + 1
@@ -419,11 +420,46 @@ namespace PCE
 								Plane |= ((ColIdx & MaskU) ? 1 : 0) << ShiftU;
 							}
 							Out.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
-
-							//!< R
-							Plane = 0;
+						}
+					}
+					//!< RT
+					for (auto pl = 0; pl < 2; ++pl) {
+						for (auto i = 0; i < H2; ++i) {
+							uint16_t Plane = 0;
 							for (auto j = 0; j < W2; ++j) {
-								const auto ColIdx = p.ColorIndices[i * W + j + W2] + 1; //!< 先頭の透明色を考慮して + 1
+								const auto ColIdx = p.ColorIndices[i * W + j + W2] + 1; 
+								const auto ShiftL = 7 - j;
+								const auto ShiftU = ShiftL + 8;
+								const auto MaskL = 1 << ((pl << 1) + 0);
+								const auto MaskU = 1 << ((pl << 1) + 1);
+								Plane |= ((ColIdx & MaskL) ? 1 : 0) << ShiftL;
+								Plane |= ((ColIdx & MaskU) ? 1 : 0) << ShiftU;
+							}
+							Out.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
+						}
+					}
+					//!< LB
+					for (auto pl = 0; pl < 2; ++pl) {
+						for (auto i = 0; i < H2; ++i) {
+							uint16_t Plane = 0;
+							for (auto j = 0; j < W2; ++j) {
+								const auto ColIdx = p.ColorIndices[(i + H2) * W + j] + 1;
+								const auto ShiftL = 7 - j;
+								const auto ShiftU = ShiftL + 8;
+								const auto MaskL = 1 << ((pl << 1) + 0);
+								const auto MaskU = 1 << ((pl << 1) + 1);
+								Plane |= ((ColIdx & MaskL) ? 1 : 0) << ShiftL;
+								Plane |= ((ColIdx & MaskU) ? 1 : 0) << ShiftU;
+							}
+							Out.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
+						}
+					}
+					//!< RB
+					for (auto pl = 0; pl < 2; ++pl) {
+						for (auto i = 0; i < H2; ++i) {
+							uint16_t Plane = 0;
+							for (auto j = 0; j < W2; ++j) {
+								const auto ColIdx = p.ColorIndices[(i + H2) * W + j + W2] + 1;
 								const auto ShiftL = 7 - j;
 								const auto ShiftU = ShiftL + 8;
 								const auto MaskL = 1 << ((pl << 1) + 0);
@@ -606,7 +642,7 @@ static void ProcessPalette(std::string_view Name, std::string_view File)
 		std::cout << "[ Output Palette ] " << Name << " (" << File << ")" << std::endl;
 
 #pragma region PCE
-#if 1
+#if 0
 		PCE::ImageConverter<>(Image).Create().OutputPalette(std::string(Name) + ".bin").RestorePalette();
 #else
 		PCE::BGConverter<>(Image).Create().OutputPalette(std::string(Name) + ".bin").RestorePalette();
@@ -619,13 +655,13 @@ static void ProcessTileSet(std::string_view Name, std::string_view File, [[maybe
 	if (!empty(File)) {
 		auto Image = cv::imread(data(File));
 		std::cout << "[ Output Pattern ] " << Name << " (" << File << ")" << std::endl;
-
 #pragma region PCE
-#if 1
+#if 0
 		//!< イメージの場合はパターンが全部異なったりするので、マップ(BAT) を復元するのと大して変わらない
 		PCE::ImageConverter<>(Image).Create().OutputPattern(std::string(Name) + ".bin");
 #else
 		PCE::BGConverter<>(Image).Create().OutputPattern(std::string(Name) + ".bin").RestorePattern();
+		std::cout << "[ Output PatternPalette ] " << Name << ".pal" << " (" << File << ")" << std::endl;
 		PCE::BGConverter<>(Image).Create().OutputPatternPalette(std::string(Name) + ".pal.bin");
 #endif
 #pragma endregion
@@ -637,7 +673,7 @@ static void ProcessMap(std::string_view Name, std::string_view File, std::string
 		auto Image = cv::imread(data(File));
 
 #pragma region PCE
-#if 1
+#if 0
 		std::cout << "[ Output BAT ] " << Name << " (" << File << ")" << std::endl;
 		PCE::ImageConverter<>(Image).Create().OutputBAT(std::string(Name) + ".bin").RestoreMap();
 #else
