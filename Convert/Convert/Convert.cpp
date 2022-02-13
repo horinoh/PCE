@@ -74,6 +74,19 @@ class Converter
 public:
 	Converter(const cv::Mat& Img) : Image(Img) {}
 
+	using Palette = std::vector<uint16_t>;
+
+	template <uint32_t W, uint32_t H>
+	class Pattern
+	{
+	public:
+		uint32_t PaletteIndex;
+		std::array<uint8_t, W* H> ColorIndices;
+	};
+
+	virtual uint16_t ToPlatformColor(const cv::Vec3b& Color) const { return 0; }
+	virtual cv::Vec3b FromPlatformColor(const uint16_t& Color) const { return cv::Vec3b(0, 0, 0); }
+
 	virtual Converter& Create() {
 		CreateMap();
 		CreatePalette();
@@ -82,7 +95,7 @@ public:
 		return *this;
 	}
 
-	void PatternSegmentation(const cv::Size& MapSize, const cv::Size& PatSize) {
+	void SplitMap(const cv::Size& MapSize, const cv::Size& PatSize) {
 		CCPatterns.clear();
 		Maps.clear();
 		for (auto i = 0; i < MapSize.height; ++i) {
@@ -140,43 +153,38 @@ protected:
 };
 
 #pragma region PCE
+/*
+* 画面		: 256 x 224
+* BG		: 512 x 256(6 種類ある)、(15 + 1) 色 x 16 パレット (9 ビットカラー = 8 x 8 x 8 = 512 色)
+* スプライト	: 64 枚、16 x 16 等(6 種類ある)、(15 + 1) 色 x 16 パレット (9 ビットカラー)
+*/
 namespace PCE
 {
-	//!< 0000 000G GGRR RBBB : 9 ビットカラー
-	static uint16_t ToPCEColor(const cv::Vec3b& Color) { return ((Color[1] >> 5) << 6) | ((Color[2] >> 5) << 3) | (Color[0] >> 5); }
-	//!< Vec3b(B, G, R)
-	static cv::Vec3b FromPCEColor(const uint16_t& Color) { return cv::Vec3b((Color & 0x7) << 5, ((Color & (0x7 << 6)) >> 6) << 5, ((Color & (0x7 << 3)) >> 3) << 5); }
-
-	using PCEPalette = std::vector<uint16_t>;
-
-	template <uint32_t W, uint32_t H>
-	class PCEPattern
-	{
-	public:
-		uint32_t PaletteIndex;
-		std::array<uint8_t, W * H> ColorIndices;
-	};
-
 	template<uint8_t W, uint8_t H>
-	class ConverterPCE : public Converter
+	class ConverterBase : public Converter
 	{
 	private:
 		using Super = Converter;
 	public:
-		ConverterPCE(const cv::Mat& Img) : Super(Img), MapSize(Image.cols / W, Image.rows / H) {}
+		ConverterBase(const cv::Mat& Img) : Super(Img), MapSize(Image.cols / W, Image.rows / H) {}
 
-		virtual ConverterPCE& CreateMap() override {
-			PatternSegmentation(MapSize, cv::Size(W, H));
+		//!< 0000 000G GGRR RBBB : 9 ビットカラー
+		virtual uint16_t ToPlatformColor(const cv::Vec3b& Color) const override { return ((Color[1] >> 5) << 6) | ((Color[2] >> 5) << 3) | (Color[0] >> 5); }
+		//!< Vec3b(B, G, R)
+		virtual cv::Vec3b FromPlatformColor(const uint16_t& Color) const override { return cv::Vec3b((Color & 0x7) << 5, ((Color & (0x7 << 6)) >> 6) << 5, ((Color & (0x7 << 3)) >> 3) << 5); }
+
+		virtual ConverterBase& CreateMap() override {
+			SplitMap(MapSize, cv::Size(W, H));
 			return *this;
 		}
-		virtual ConverterPCE& CreatePalette() override {
+		virtual ConverterBase& CreatePalette() override {
 			PaletteIndices.clear();
 			Palettes.clear();
 			for (auto pat : CCPatterns) {
-				PCEPalette Pal;
+				Palette Pal;
 				for (auto i = 0; i < pat.rows; ++i) {
 					for (auto j = 0; j < pat.cols; ++j) {
-						const auto Color = ToPCEColor(pat.ptr<cv::Vec3b>(i)[j]);
+						const auto Color = ToPlatformColor(pat.ptr<cv::Vec3b>(i)[j]);
 						if (end(Pal) == std::ranges::find(Pal, Color)) {
 							Pal.emplace_back(Color);
 						}
@@ -199,14 +207,14 @@ namespace PCE
 			}
 			return *this;
 		}
-		virtual ConverterPCE& OptimizePalette() override {
+		virtual ConverterBase& OptimizePalette() override {
 			while ([&]() {
 				for (auto i = 0; i < size(Palettes); ++i) {
 					for (auto j = i + 1; j < size(Palettes); ++j) {
 						auto& lhs = Palettes[i];
 						auto& rhs = Palettes[j];
 						if (!empty(lhs) && !empty(rhs)) {
-							PCEPalette UnionSet;
+							Palette UnionSet;
 							std::ranges::set_union(lhs, rhs, std::back_inserter(UnionSet));
 							//!< パレットの和集合が 15 色以下に収まる場合は、一つのパレットにまとめる事が可能
 							if (16 > size(UnionSet)) {
@@ -233,12 +241,12 @@ namespace PCE
 			}
 			//!< 空になったパレットは消す
 			{
-				const auto [B, E] = std::ranges::remove_if(Palettes, [](const PCEPalette& rhs) { return empty(rhs); });
+				const auto [B, E] = std::ranges::remove_if(Palettes, [](const Palette& rhs) { return empty(rhs); });
 				Palettes.erase(B, E);
 			}
 			return *this;
 		}
-		virtual ConverterPCE& CreatePattern() override {
+		virtual ConverterBase& CreatePattern() override {
 			Patterns.clear();
 			for (auto p = 0; p < size(CCPatterns); ++p) {
 				const auto& Pat = CCPatterns[p];
@@ -247,7 +255,7 @@ namespace PCE
 				const auto& Pal = Palettes[Patterns.back().PaletteIndex];
 				for (auto i = 0; i < Pat.rows; ++i) {
 					for (auto j = 0; j < Pat.cols; ++j) {
-						Patterns.back().ColorIndices[i * W + j] = static_cast<uint32_t>(std::distance(begin(Pal), std::ranges::find(Pal, ToPCEColor(Pat.ptr<cv::Vec3b>(i)[j]))));
+						Patterns.back().ColorIndices[i * W + j] = static_cast<uint32_t>(std::distance(begin(Pal), std::ranges::find(Pal, ToPlatformColor(Pat.ptr<cv::Vec3b>(i)[j]))));
 					}
 				}
 			}
@@ -280,7 +288,7 @@ namespace PCE
 			cv::Mat Res(cv::Size(15, static_cast<int>(size(Palettes))), Image.type());
 			for (auto i = 0; i < size(Palettes); ++i) {
 				for (auto j = 0; j < 15; ++j) {
-					Res.ptr<cv::Vec3b>(i)[j] = j < size(Palettes[i]) ? FromPCEColor(Palettes[i][j]) : cv::Vec3b();
+					Res.ptr<cv::Vec3b>(i)[j] = j < size(Palettes[i]) ? FromPlatformColor(Palettes[i][j]) : cv::Vec3b();
 				}
 			}
 			Preview("Palette", Res, Res.size() * 50);
@@ -298,7 +306,7 @@ namespace PCE
 				cv::Mat Tile(cv::Size(W, H), Image.type());
 				for (auto i = 0; i < H; ++i) {
 					for (auto j = 0; j < W; ++j) {
-						Tile.ptr<cv::Vec3b>(i)[j] = FromPCEColor(Pal[Pat.ColorIndices[i * W + j]]);
+						Tile.ptr<cv::Vec3b>(i)[j] = FromPlatformColor(Pal[Pat.ColorIndices[i * W + j]]);
 					}
 				}
 				Tile.copyTo(Res(cv::Rect((p % 16) * W, (p / 16) * H, W, H)));
@@ -319,7 +327,7 @@ namespace PCE
 				cv::Mat Tile(cv::Size(W, H), Image.type());
 				for (auto i = 0; i < H; ++i) {
 					for (auto j = 0; j < W; ++j) {
-						Tile.ptr<cv::Vec3b>(i)[j] = FromPCEColor(Pal[Pat.ColorIndices[i * W + j]]);
+						Tile.ptr<cv::Vec3b>(i)[j] = FromPlatformColor(Pal[Pat.ColorIndices[i * W + j]]);
 					}
 				}
 				Tile.copyTo(Res(cv::Rect((m % MapSize.width) * W, (m / MapSize.width) * H, W, H)));
@@ -331,20 +339,33 @@ namespace PCE
 			return *this;
 		}
 
+	private:
+		std::vector<uint32_t> PaletteIndices;
 	protected:
 		cv::Size MapSize;
-		std::vector<uint32_t> PaletteIndices;
-		std::vector<PCEPalette> Palettes;
-		std::vector<PCEPattern<W, H>> Patterns;
-		//std::vector<uint16_t> Maps;
+		std::vector<Palette> Palettes;
+		std::vector<Pattern<W, H>> Patterns;
 	};
 
 	//!< イメージ : スクロールさせない静止画向き
+	//!< 4 プレーンに分けて出力、4 プレーンを合わせるとカラーインデックスが求まる
+	//!< パターン 8 x 8 を表すのに
+	//!<	最初の u16 x 8 の 上位下位 8 ビットへプレーン 0, 1、続く u16 x 8 の 上位下位 8 ビットへプレーン 2, 3
+	//!<	u16[00] 1111111100000000
+	//!<	u16[01] 1111111100000000
+	//!<	....
+	//!<	u16[14] 3333333322222222
+	//!<	u16[15] 3333333322222222
+	//!<  
+	//!<	Background Attribute Table (BAT)
+	//!<	BAT を用いて、使用パレットはパターン毎に指定が可能 
+	//!<    LLLLTTTT TTTTTTTT
+	//!<	L : パレット番号[0, 15]、T : パターン番号 [0, 4095](内ユーザが使えるのは[256, 4095])
 	template<uint8_t W = 8, uint8_t H = 8>
-	class ImageConverter : public ConverterPCE<W, H>
+	class ImageConverter : public ConverterBase<W, H>
 	{
 	private:
-		using Super = ConverterPCE<W, H>;
+		using Super = ConverterBase<W, H>;
 	public:
 		ImageConverter(const cv::Mat& Img) : Super(Img) {}
 
@@ -393,11 +414,26 @@ namespace PCE
 	};
 
 	//!< BG : スクロールさせる背景
+	//!< 4 プレーンに分けて出力、4 プレーンを合わせるとカラーインデックスが求まる
+	//!< タイル 16 x 16 を並べてマップを作成することになる (8 x 8 ではなく 16 x 16 単位なので注意) 
+	//!< タイルの 1 / 4 部分である 8 x 8 を表すのに以下のようになる
+	//!<	最初の u16 x 8 の 上位下位 8 ビットへプレーン 0, 1、続く u16 x 8 の 上位下位 8 ビットへプレーン 2, 3
+	//!<	u16[00] 1111111100000000
+	//!<	u16[01] 1111111100000000
+	//!<	....
+	//!<	u16[14] 3333333322222222
+	//!<	u16[15] 3333333322222222
+	//!<	
+	//!<	タイル 16 x 16 を表すには 4 回繰り返す、LT, RT, LB, RB の順
+	//!<  
+	//!< 使用パレットはタイル毎に指定が可能、タイル数分だけパレット番号を別途出力する(4 ビットシフトする必要がある)
+	//!< 
+	//!< マップは単純にタイル番号の uint8_t 羅列となる
 	template<uint32_t W = 16, uint32_t H = 16>
-	class BGConverter : public ConverterPCE<W, H>
+	class BGConverter : public ConverterBase<W, H>
 	{
 	private:
-		using Super = ConverterPCE<W, H>;
+		using Super = ConverterBase<W, H>;
 	public:
 		BGConverter(const cv::Mat& Img) : Super(Img) {}
 
@@ -483,7 +519,7 @@ namespace PCE
 			std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 			if (!Out.bad()) {
 				for (auto p : this->Patterns) {
-					const uint8_t PalIdx = p.PaletteIndex << 4; //!< パターン毎のパレットインデックス (4 ビットシフトする必要がある)
+					const uint8_t PalIdx = p.PaletteIndex << 4; //!< タイル毎のパレットインデックス (4 ビットシフトする必要がある)
 					Out.write(reinterpret_cast<const char*>(&PalIdx), sizeof(PalIdx));
 				}
 				Out.close();
@@ -505,11 +541,12 @@ namespace PCE
 	};
 
 	//!< スプライト
+	//!< 4 プレーンに分けて出力、4 プレーンを合わせるとカラーインデックスが求まる
 	template<uint8_t W = 16, uint8_t H = 16>
-	class SpriteConverter : public ConverterPCE<W, H>
+	class SpriteConverter : public ConverterBase<W, H>
 	{
 	private:
-		using Super = ConverterPCE<W, H>;
+		using Super = ConverterBase<W, H>;
 	public:
 		SpriteConverter(const cv::Mat& Img) : Super(Img) {}
 
@@ -521,6 +558,8 @@ namespace PCE
 			std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 			if (!Out.bad()) {
 				for (auto pat : this->Patterns) {
+					//!< パターン毎のパレットインデックス
+					std::cout << "\t Palette = " << pat.PaletteIndex << std::endl;
 					//std::cout << "//!< Pattern " << std::endl;
 					for (auto pl = 0; pl < 4; ++pl) {
 						//std::cout << "\t//!< Plane " << pl << std::endl;
@@ -546,6 +585,11 @@ namespace PCE
 #pragma endregion //!< PCE
 
 #pragma region FC
+/*
+* 画面		: 256 x 240
+* BG		: 256 x 240 x 2 画面、パターン 8 x 8 x 256 種、(3 + 1) 色 x 4 パレット (52色中)
+* スプライト	: 8x8、64 枚、パターン 8 x 8 x 256 種、(3 + 1) 色 x 4 パレット (52色中) 
+*/
 namespace FC {
 #define TO_BGR(r, g, b) cv::Vec3b(b, g, r)
 	//!< FC では固定の 64 色分のエントリがある (ただし同色もあるので実質は 52 色)
@@ -616,28 +660,272 @@ namespace FC {
 		TO_BGR(0,   0,   0),
 	};
 #undef TO_BGR
-	//!< 一番近い色のインデックスを返す
-	static uint8_t ToFCColor(const cv::Vec3b& Color) {
-		uint8_t Index = 0xff;
-		float minDistSq = std::numeric_limits<float>::max();
-		for (auto i = 0; i < size(ColorEntries);++i) {
-			const auto d = cv::Vec3f(ColorEntries[i]) - cv::Vec3f(Color);
-			const auto distSq = d.dot(d);
-			if (distSq < minDistSq) {
-				minDistSq = distSq;
-				Index = i;
+
+	//!< 2 プレーンに分けて出力、2 プレーンを合わせるとカラーインデックスが求まる
+	//!< パターン 8 x 8 を表すのに
+	//!<	最初の u8 x 8 へプレーン 0、続く u8 x 8 へプレーン 1
+	//!<	u8[00] 00000000
+	//!<	u8[01] 00000000
+	//!<	....
+	//!<	u8[14] 11111111
+	//!<	u8[15] 11111111
+	template<uint8_t W, uint8_t H>
+	class ConverterBase : public Converter
+	{
+	private:
+		using Super = Converter;
+	public:
+		ConverterBase(const cv::Mat& Img) : Super(Img), MapSize(Image.cols / W, Image.rows / H) {}
+
+		//!< 一番近い色のインデックスを返す
+		virtual uint16_t ToPlatformColor(const cv::Vec3b& Color) const override {
+			uint8_t Index = 0xff;
+			float minDistSq = std::numeric_limits<float>::max();
+			for (auto i = 0; i < size(ColorEntries); ++i) {
+				const auto d = cv::Vec3f(ColorEntries[i]) - cv::Vec3f(Color);
+				const auto distSq = d.dot(d);
+				if (distSq < minDistSq) {
+					minDistSq = distSq;
+					Index = i;
+				}
 			}
+			return Index;
 		}
-		return Index;
-	}
-	static cv::Vec3b FromFCColor(const uint8_t& Index) {
-		if (Index < size(ColorEntries)) {
-			return ColorEntries[Index];
+		virtual cv::Vec3b FromPlatformColor(const uint16_t& Index) const override {
+			if (Index < size(ColorEntries)) {
+				return ColorEntries[Index];
+			}
+			return cv::Vec3b(0, 0, 0);
 		}
-		return cv::Vec3b(0, 0, 0);
-	}
+
+		virtual ConverterBase& CreateMap() override {
+			SplitMap(MapSize, cv::Size(W, H));
+			return *this;
+		}
+		virtual ConverterBase& CreatePalette() override {
+			PaletteIndices.clear();
+			Palettes.clear();
+			for (auto pat : CCPatterns) {
+				Palette Pal;
+				for (auto i = 0; i < pat.rows; ++i) {
+					for (auto j = 0; j < pat.cols; ++j) {
+						const auto Color = ToPlatformColor(pat.ptr<cv::Vec3b>(i)[j]);
+						if (end(Pal) == std::ranges::find(Pal, Color)) {
+							Pal.emplace_back(Color);
+						}
+					}
+				}
+				//!< FC ではパレットに 4 色まで (先頭に透明色が入ることになるので、ここでは 3 色までに収まっていないといけない)
+				if (size(Pal) > 3) { std::cerr << "Color Exceed " << size(Pal) << std::endl; }
+				//!< ソートしておく
+				std::ranges::sort(Pal);
+				//!< 既存でない場合はパレットの追加
+				//!< パターンが使用するパレットインデックスを覚えておく
+				const auto It = std::ranges::find(Palettes, Pal);
+				if (end(Palettes) == It) {
+					PaletteIndices.emplace_back(static_cast<uint32_t>(size(Palettes)));
+					Palettes.emplace_back(Pal);
+				}
+				else {
+					PaletteIndices.emplace_back(static_cast<uint32_t>(std::distance(begin(Palettes), It)));
+				}
+			}
+			return *this;
+		}
+		virtual ConverterBase& OptimizePalette() override {
+			while ([&]() {
+				for (auto i = 0; i < size(Palettes); ++i) {
+					for (auto j = i + 1; j < size(Palettes); ++j) {
+						auto& lhs = Palettes[i];
+						auto& rhs = Palettes[j];
+						if (!empty(lhs) && !empty(rhs)) {
+							Palette UnionSet;
+							std::ranges::set_union(lhs, rhs, std::back_inserter(UnionSet));
+							//!< パレットの和集合が 3 色以下に収まる場合は、一つのパレットにまとめる事が可能
+							if (4 > size(UnionSet)) {
+								lhs.assign(begin(UnionSet), end(UnionSet));
+								rhs.clear();
+								std::ranges::replace(PaletteIndices, j, i);
+								return true;
+							}
+						}
+					}
+				}
+				return false;
+				}()) {
+			}
+			//!< パレット番号を詰める
+				{
+					auto SortUnique = PaletteIndices;
+					std::ranges::sort(SortUnique);
+					const auto [B, E] = std::ranges::unique(SortUnique);
+					SortUnique.erase(B, E);
+					for (auto i = 0; i < size(SortUnique); ++i) {
+						std::ranges::replace(PaletteIndices, SortUnique[i], i);
+					}
+				}
+				//!< 空になったパレットは消す
+				{
+					const auto [B, E] = std::ranges::remove_if(Palettes, [](const Palette& rhs) { return empty(rhs); });
+					Palettes.erase(B, E);
+				}
+				return *this;
+		}
+		virtual ConverterBase& CreatePattern() override {
+			Patterns.clear();
+			for (auto p = 0; p < size(CCPatterns); ++p) {
+				const auto& Pat = CCPatterns[p];
+				Patterns.emplace_back();
+				Patterns.back().PaletteIndex = PaletteIndices[p];
+				const auto& Pal = Palettes[Patterns.back().PaletteIndex];
+				for (auto i = 0; i < Pat.rows; ++i) {
+					for (auto j = 0; j < Pat.cols; ++j) {
+						Patterns.back().ColorIndices[i * W + j] = static_cast<uint32_t>(std::distance(begin(Pal), std::ranges::find(Pal, ToPlatformColor(Pat.ptr<cv::Vec3b>(i)[j]))));
+					}
+				}
+			}
+			return *this;
+		}
+
+		virtual const Converter& OutputPalette(std::string_view Path) const override {
+			std::cout << "\tPalette count = " << size(Palettes) << std::endl;
+			//!< FC ではパレット数 4 まで (BG、スプライトそれぞれ 4)
+			if (size(Palettes) > 4) { std::cerr << "\tPalette Exceed 4" << std::endl; }
+
+			std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+			if (!Out.bad()) {
+				for (auto i : Palettes) {
+					const uint16_t Color = 0;
+					Out.write(reinterpret_cast<const char*>(&Color), sizeof(Color)); //!< 先頭に透明色(ここでは0)を出力
+					Out.write(reinterpret_cast<const char*>(data(i)), size(i) * sizeof(i[0]));
+					for (auto j = size(i); j < 4; j++) {
+						Out.write(reinterpret_cast<const char*>(&Color), sizeof(Color)); //!< 空き要素分(ここでは0)を出力
+					}
+				}
+				Out.close();
+			}
+			return *this;
+		}
+
+		//!< 復元して表示してみる (パレットチェック用)
+		virtual const Converter& RestorePalette() const override {
+#ifdef _DEBUG
+			cv::Mat Res(cv::Size(4, static_cast<int>(size(Palettes))), Image.type());
+			for (auto i = 0; i < size(Palettes); ++i) {
+				for (auto j = 0; j < 4; ++j) {
+					Res.ptr<cv::Vec3b>(i)[j] = j < size(Palettes[i]) ? FromPlatformColor(Palettes[i][j]) : cv::Vec3b();
+				}
+			}
+			Preview("Palette", Res, Res.size() * 50);
+#endif
+			return *this;
+		}
+		//!< 復元して表示してみる (パターンチェック用)
+		virtual const Converter& RestorePattern() const override {
+#ifdef _DEBUG
+			const auto PatCount = static_cast<int>(size(Patterns));
+			cv::Mat Res(cv::Size(16 * W, (PatCount / 16 + 1) * H), Image.type());
+			for (auto p = 0; p < size(Patterns); ++p) {
+				const auto& Pat = Patterns[p];
+				const auto& Pal = Palettes[Pat.PaletteIndex];
+				cv::Mat Tile(cv::Size(W, H), Image.type());
+				for (auto i = 0; i < H; ++i) {
+					for (auto j = 0; j < W; ++j) {
+						Tile.ptr<cv::Vec3b>(i)[j] = FromPlatformColor(Pal[Pat.ColorIndices[i * W + j]]);
+					}
+				}
+				Tile.copyTo(Res(cv::Rect((p % 16) * W, (p / 16) * H, W, H)));
+			}
+
+			DrawGrid(Res, cv::Size(W, H));
+			Preview("Pattern", Res, Res.size() * 5);
+#endif
+			return *this;
+		}
+		//!< 復元して表示してみる (マップチェック用)
+		virtual const Converter& RestoreMap() const override {
+#ifdef _DEBUG
+			cv::Mat Res(Image.size(), Image.type());
+			for (auto m = 0; m < size(Maps); ++m) {
+				const auto& Pat = Patterns[Maps[m]];
+				const auto& Pal = Palettes[Pat.PaletteIndex];
+				cv::Mat Tile(cv::Size(W, H), Image.type());
+				for (auto i = 0; i < H; ++i) {
+					for (auto j = 0; j < W; ++j) {
+						Tile.ptr<cv::Vec3b>(i)[j] = FromPlatformColor(Pal[Pat.ColorIndices[i * W + j]]);
+					}
+				}
+				Tile.copyTo(Res(cv::Rect((m % MapSize.width) * W, (m / MapSize.width) * H, W, H)));
+			}
+
+			DrawGrid(Res, cv::Size(W, H));
+			Preview("Map", Res, Res.size() * 3);
+#endif
+			return *this;
+		}
+
+	private:
+		std::vector<uint32_t> PaletteIndices;
+	protected:
+		cv::Size MapSize;
+		std::vector<Palette> Palettes;
+		std::vector<Pattern<W, H>> Patterns;
+	};
+	//!< スプライト
+	//!< 2 プレーンに分けて出力、2 プレーンを合わせるとカラーインデックスが求まる
+	template<uint8_t W = 8, uint8_t H = 8>
+	class SpriteConverter : public ConverterBase<W, H>
+	{
+	private:
+		using Super = ConverterBase<W, H>;
+	public:
+		SpriteConverter(const cv::Mat& Img) : Super(Img) {}
+
+		virtual SpriteConverter& Create() override { Super::Create(); return *this; }
+
+		virtual const SpriteConverter& OutputPattern(std::string_view Path) const override {
+			std::cout << "\tPattern count = " << size(this->Patterns) << std::endl;
+			std::cout << "\tSprite size = " << static_cast<uint16_t>(W) << " x " << static_cast<uint16_t>(H) << std::endl;
+			std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+			if (!Out.bad()) {
+				for (auto pat : this->Patterns) {
+					//!< パターン毎のパレットインデックス
+					std::cout << "\t Palette = " << pat.PaletteIndex << std::endl;
+					//std::cout << "//!< Pattern " << std::endl;
+					for (auto pl = 0; pl < 2; ++pl) {
+						//std::cout << "\t//!< Plane " << pl << std::endl;
+						for (auto i = 0; i < H; ++i) {
+							uint16_t Plane = 0;
+							for (auto j = 0; j < W; ++j) {
+								const auto ColIdx = pat.ColorIndices[i * W + j] + 1; //!< 先頭の透明色を考慮して + 1
+								const auto Shift = 7 - j;
+								const auto Mask = 1 << pl;
+								Plane |= ((ColIdx & Mask) ? 1 : 0) << Shift;
+							}
+							Out.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
+							//std::cout << "\t0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane << "," << std::endl;
+						}
+					}
+				}
+				Out.close();
+			}
+			return *this;
+		}
+	};
 }
 #pragma endregion //!< FC
+
+#pragma region GB
+/*
+* 画面		: 160 x 144
+* BG		: 256 x 256、4 諧調モノクロ
+* スプライト	: 40 枚、4 諧調モノクロ
+*/
+namespace GB
+{
+
+}
+#pragma endregion //!< GB
 
 static void ProcessPalette(std::string_view Name, std::string_view File)
 {
