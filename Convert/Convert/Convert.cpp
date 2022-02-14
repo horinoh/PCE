@@ -69,24 +69,29 @@ static void ColorReduction(cv::Mat& Dst, const cv::Mat& Image, const uint32_t Co
 	}
 }
 
+using Palette = std::vector<uint16_t>;
+
+template <uint32_t W, uint32_t H>
+class Pattern
+{
+public:
+	uint32_t PaletteIndex;
+	std::array<uint8_t, W* H> ColorIndices;
+};
+
+template<uint8_t W, uint8_t H>
 class Converter
 {
 public:
-	Converter(const cv::Mat& Img) : Image(Img) {}
-
-	using Palette = std::vector<uint16_t>;
-
-	template <uint32_t W, uint32_t H>
-	class Pattern
-	{
-	public:
-		uint32_t PaletteIndex;
-		std::array<uint8_t, W* H> ColorIndices;
-	};
+	Converter(const cv::Mat& Img) : Image(Img), MapSize(this->Image.cols / W, this->Image.rows / H) {}
 
 	virtual uint16_t ToPlatformColor(const cv::Vec3b& Color) const { return 0; }
 	virtual cv::Vec3b FromPlatformColor(const uint16_t& Color) const { return cv::Vec3b(0, 0, 0); }
 
+	virtual uint16_t GetPaletteCount() const = 0;
+	virtual uint16_t GetPaletteColorCount() const = 0;
+
+#pragma region CREATE
 	virtual Converter& Create() {
 		CreateMap();
 		CreatePalette();
@@ -94,13 +99,12 @@ public:
 		CreatePattern();
 		return *this;
 	}
-
-	void SplitMap(const cv::Size& MapSize, const cv::Size& PatSize) {
+	virtual Converter& CreateMap() { 
 		CCPatterns.clear();
 		Maps.clear();
 		for (auto i = 0; i < MapSize.height; ++i) {
 			for (auto j = 0; j < MapSize.width; ++j) {
-				const auto NoFlip = Image(cv::Rect(j * PatSize.width, i * PatSize.height, PatSize.width, PatSize.height));
+				const auto NoFlip = Image(cv::Rect(j * W, i * H, W, H));
 				cv::Mat VFlip, HFlip, VHFlip;
 				cv::flip(NoFlip, VFlip, 0);
 				cv::flip(NoFlip, HFlip, 1);
@@ -133,23 +137,182 @@ public:
 				}
 			}
 		}
+		return *this; 
 	}
-	virtual Converter& CreateMap() { return *this; }
-	virtual Converter& CreatePalette() { return *this; }
-	virtual Converter& OptimizePalette() { return *this; }
-	virtual Converter& CreatePattern() { return *this; }
+	virtual Converter& CreatePalette()  {
+		PaletteIndices.clear();
+		Palettes.clear();
+		for (auto pat : CCPatterns) {
+			Palette Pal;
+			for (auto i = 0; i < pat.rows; ++i) {
+				for (auto j = 0; j < pat.cols; ++j) {
+					const auto Color = ToPlatformColor(pat.ptr<cv::Vec3b>(i)[j]);
+					if (end(Pal) == std::ranges::find(Pal, Color)) {
+						Pal.emplace_back(Color);
+					}
+				}
+			}
+			//!< 先頭に透明色が入っている前提 GetPaletteColorCount() - 1 に収まっていないといけない
+			if (size(Pal) > GetPaletteColorCount() - 1) { std::cerr << "Color Exceed " << size(Pal) << std::endl; }
+			//!< ソートしておく
+			std::ranges::sort(Pal);
+			//!< 既存でない場合はパレットの追加
+			//!< パターンが使用するパレットインデックスを覚えておく
+			const auto It = std::ranges::find(Palettes, Pal);
+			if (end(Palettes) == It) {
+				PaletteIndices.emplace_back(static_cast<uint32_t>(size(Palettes)));
+				Palettes.emplace_back(Pal);
+			}
+			else {
+				PaletteIndices.emplace_back(static_cast<uint32_t>(std::distance(begin(Palettes), It)));
+			}
+		}
+		return *this;
+	}
+	virtual Converter& OptimizePalette() {
+		while ([&]() {
+			for (auto i = 0; i < size(Palettes); ++i) {
+				for (auto j = i + 1; j < size(Palettes); ++j) {
+					auto& lhs = Palettes[i];
+					auto& rhs = Palettes[j];
+					if (!empty(lhs) && !empty(rhs)) {
+						Palette UnionSet;
+						std::ranges::set_union(lhs, rhs, std::back_inserter(UnionSet));
+						//!< パレットの和集合が GetPaletteColorCount() 色以下に収まる場合は、一つのパレットにまとめる事が可能
+						if (GetPaletteColorCount() > size(UnionSet)) {
+							lhs.assign(begin(UnionSet), end(UnionSet));
+							rhs.clear();
+							std::ranges::replace(PaletteIndices, j, i);
+							return true;
+						}
+					}
+				}
+			}
+			return false;
+			}()) {
+		}
+		//!< パレット番号を詰める
+		{
+			auto SortUnique = PaletteIndices;
+			std::ranges::sort(SortUnique);
+			const auto [B, E] = std::ranges::unique(SortUnique);
+			SortUnique.erase(B, E);
+			for (auto i = 0; i < size(SortUnique); ++i) {
+				std::ranges::replace(PaletteIndices, SortUnique[i], i);
+			}
+		}
+		//!< 空になったパレットは消す
+		{
+			const auto [B, E] = std::ranges::remove_if(Palettes, [](const Palette& rhs) { return empty(rhs); });
+			Palettes.erase(B, E);
+		}
+		return *this;
+	}
+	virtual Converter& CreatePattern() {
+		//!< デフォルト実装 : パターン毎にパレットを持つ
+		Patterns.clear();
+		for (auto p = 0; p < size(CCPatterns); ++p) {
+			const auto& Pat = CCPatterns[p];
+			Patterns.emplace_back();
+			Patterns.back().PaletteIndex = PaletteIndices[p];
+			const auto& Pal = this->Palettes[Patterns.back().PaletteIndex];
+			for (auto i = 0; i < Pat.rows; ++i) {
+				for (auto j = 0; j < Pat.cols; ++j) {
+					Patterns.back().ColorIndices[i * W + j] = static_cast<uint32_t>(std::distance(begin(Pal), std::ranges::find(Pal, ToPlatformColor(Pat.ptr<cv::Vec3b>(i)[j]))));
+				}
+			}
+		}
+		return *this;
+	}
+#pragma endregion
 
-	virtual const Converter& OutputPalette(std::string_view Path) const { return *this; }
+#pragma region OUTPUT
+	virtual const Converter& OutputPalette(std::string_view Path) const {
+		std::cout << "\tPalette count = " << size(Palettes) << std::endl;
+		if (size(Palettes) > GetPaletteCount()) { std::cerr << "\tPalette Exceed" << std::endl; }
+
+		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+		if (!Out.bad()) {
+			for (auto i : Palettes) {
+				const uint16_t Color = 0;
+				Out.write(reinterpret_cast<const char*>(&Color), sizeof(Color)); //!< 先頭に透明色(ここでは0)を出力
+				Out.write(reinterpret_cast<const char*>(data(i)), size(i) * sizeof(i[0]));
+				for (auto j = size(i); j < GetPaletteColorCount(); j++) {
+					Out.write(reinterpret_cast<const char*>(&Color), sizeof(Color)); //!< 空き要素分(ここでは0)を出力
+				}
+			}
+			Out.close();
+		}
+		return *this;
+	}
 	virtual const Converter& OutputPattern(std::string_view Path) const { return *this; }
+#pragma endregion
 
-	virtual const Converter& RestorePalette() const { return *this; }
-	virtual const Converter& RestorePattern() const { return *this; }
-	virtual const Converter& RestoreMap() const { return *this; }
+#pragma region RESTORE
+	virtual const Converter& RestorePalette() const {
+#ifdef _DEBUG
+		cv::Mat Res(cv::Size(GetPaletteColorCount() - 1, static_cast<int>(size(Palettes))), Image.type());
+		for (auto i = 0; i < size(Palettes); ++i) {
+			for (auto j = 0; j < GetPaletteColorCount() - 1; ++j) {
+				Res.ptr<cv::Vec3b>(i)[j] = j < size(Palettes[i]) ? FromPlatformColor(Palettes[i][j]) : cv::Vec3b();
+			}
+		}
+		Preview("Palette", Res, Res.size() * 50);
+#endif
+		return *this;
+	}
+	virtual const Converter& RestorePattern() const {
+#ifdef _DEBUG
+		const auto PatCount = static_cast<int>(size(Patterns));
+		cv::Mat Res(cv::Size(16 * W, (PatCount / 16 + 1) * H), this->Image.type());
+		for (auto p = 0; p < size(Patterns); ++p) {
+			const auto& Pat = Patterns[p];
+			const auto& Pal = this->Palettes[Pat.PaletteIndex];
+			cv::Mat Tile(cv::Size(W, H), this->Image.type());
+			for (auto i = 0; i < H; ++i) {
+				for (auto j = 0; j < W; ++j) {
+					Tile.ptr<cv::Vec3b>(i)[j] = FromPlatformColor(Pal[Pat.ColorIndices[i * W + j]]);
+				}
+			}
+			Tile.copyTo(Res(cv::Rect((p % 16) * W, (p / 16) * H, W, H)));
+		}
+
+		DrawGrid(Res, cv::Size(W, H));
+		Preview("Pattern", Res, Res.size() * 5);
+#endif
+		return *this;
+	}
+	virtual const Converter& RestoreMap() const {
+#ifdef _DEBUG
+		cv::Mat Res(this->Image.size(), this->Image.type());
+		for (auto m = 0; m < size(this->Maps); ++m) {
+			const auto& Pat = Patterns[this->Maps[m]];
+			const auto& Pal = this->Palettes[Pat.PaletteIndex];
+			cv::Mat Tile(cv::Size(W, H), this->Image.type());
+			for (auto i = 0; i < H; ++i) {
+				for (auto j = 0; j < W; ++j) {
+					Tile.ptr<cv::Vec3b>(i)[j] = FromPlatformColor(Pal[Pat.ColorIndices[i * W + j]]);
+				}
+			}
+			Tile.copyTo(Res(cv::Rect((m % MapSize.width) * W, (m / MapSize.width) * H, W, H)));
+		}
+
+		DrawGrid(Res, cv::Size(W, H));
+		Preview("Map", Res, Res.size() * 3);
+#endif
+		return *this;
+	}
+#pragma endregion
 
 protected:
 	const cv::Mat& Image;
+	cv::Size MapSize;
 	std::vector<cv::Mat> CCPatterns;
+
 	std::vector<uint16_t> Maps;
+	std::vector<Pattern<W, H>> Patterns;
+	std::vector<uint32_t> PaletteIndices;
+	std::vector<Palette> Palettes;
 };
 
 #pragma region PCE
@@ -161,190 +324,18 @@ protected:
 namespace PCE
 {
 	template<uint8_t W, uint8_t H>
-	class ConverterBase : public Converter
+	class ConverterBase : public Converter<W, H>
 	{
 	private:
-		using Super = Converter;
+		using Super = Converter<W, H>;
 	public:
-		ConverterBase(const cv::Mat& Img) : Super(Img), MapSize(Image.cols / W, Image.rows / H) {}
+		ConverterBase(const cv::Mat& Img) : Super(Img) {}
 
-		//!< 0000 000G GGRR RBBB : 9 ビットカラー
 		virtual uint16_t ToPlatformColor(const cv::Vec3b& Color) const override { return ((Color[1] >> 5) << 6) | ((Color[2] >> 5) << 3) | (Color[0] >> 5); }
-		//!< Vec3b(B, G, R)
 		virtual cv::Vec3b FromPlatformColor(const uint16_t& Color) const override { return cv::Vec3b((Color & 0x7) << 5, ((Color & (0x7 << 6)) >> 6) << 5, ((Color & (0x7 << 3)) >> 3) << 5); }
 
-		virtual ConverterBase& CreateMap() override {
-			SplitMap(MapSize, cv::Size(W, H));
-			return *this;
-		}
-		virtual ConverterBase& CreatePalette() override {
-			PaletteIndices.clear();
-			Palettes.clear();
-			for (auto pat : CCPatterns) {
-				Palette Pal;
-				for (auto i = 0; i < pat.rows; ++i) {
-					for (auto j = 0; j < pat.cols; ++j) {
-						const auto Color = ToPlatformColor(pat.ptr<cv::Vec3b>(i)[j]);
-						if (end(Pal) == std::ranges::find(Pal, Color)) {
-							Pal.emplace_back(Color);
-						}
-					}
-				}
-				//!< PCE ではパレットに 16 色まで (先頭に透明色が入ることになるので、ここでは 15 色までに収まっていないといけない)
-				if (size(Pal) > 15) { std::cerr << "Color Exceed " << size(Pal) << std::endl; }
-				//!< ソートしておく
-				std::ranges::sort(Pal);
-				//!< 既存でない場合はパレットの追加
-				//!< パターンが使用するパレットインデックスを覚えておく
-				const auto It = std::ranges::find(Palettes, Pal);
-				if (end(Palettes) == It) {
-					PaletteIndices.emplace_back(static_cast<uint32_t>(size(Palettes)));
-					Palettes.emplace_back(Pal);
-				}
-				else {
-					PaletteIndices.emplace_back(static_cast<uint32_t>(std::distance(begin(Palettes), It)));
-				}
-			}
-			return *this;
-		}
-		virtual ConverterBase& OptimizePalette() override {
-			while ([&]() {
-				for (auto i = 0; i < size(Palettes); ++i) {
-					for (auto j = i + 1; j < size(Palettes); ++j) {
-						auto& lhs = Palettes[i];
-						auto& rhs = Palettes[j];
-						if (!empty(lhs) && !empty(rhs)) {
-							Palette UnionSet;
-							std::ranges::set_union(lhs, rhs, std::back_inserter(UnionSet));
-							//!< パレットの和集合が 15 色以下に収まる場合は、一つのパレットにまとめる事が可能
-							if (16 > size(UnionSet)) {
-								lhs.assign(begin(UnionSet), end(UnionSet));
-								rhs.clear();
-								std::ranges::replace(PaletteIndices, j, i);
-								return true;
-							}
-						}
-					}
-				}
-				return false;
-				}()) {
-			}
-			//!< パレット番号を詰める
-			{
-				auto SortUnique = PaletteIndices;
-				std::ranges::sort(SortUnique);
-				const auto [B, E] = std::ranges::unique(SortUnique);
-				SortUnique.erase(B, E);
-				for (auto i = 0; i < size(SortUnique); ++i) {
-					std::ranges::replace(PaletteIndices, SortUnique[i], i);
-				}
-			}
-			//!< 空になったパレットは消す
-			{
-				const auto [B, E] = std::ranges::remove_if(Palettes, [](const Palette& rhs) { return empty(rhs); });
-				Palettes.erase(B, E);
-			}
-			return *this;
-		}
-		virtual ConverterBase& CreatePattern() override {
-			Patterns.clear();
-			for (auto p = 0; p < size(CCPatterns); ++p) {
-				const auto& Pat = CCPatterns[p];
-				Patterns.emplace_back();
-				Patterns.back().PaletteIndex = PaletteIndices[p];
-				const auto& Pal = Palettes[Patterns.back().PaletteIndex];
-				for (auto i = 0; i < Pat.rows; ++i) {
-					for (auto j = 0; j < Pat.cols; ++j) {
-						Patterns.back().ColorIndices[i * W + j] = static_cast<uint32_t>(std::distance(begin(Pal), std::ranges::find(Pal, ToPlatformColor(Pat.ptr<cv::Vec3b>(i)[j]))));
-					}
-				}
-			}
-			return *this;
-		}
-
-		virtual const Converter& OutputPalette(std::string_view Path) const override {
-			std::cout << "\tPalette count = " << size(Palettes) << std::endl;
-			//!< PCE ではパレット数 16 まで (BG、スプライトそれぞれ 16)
-			if (size(Palettes) > 16) { std::cerr << "\tPalette Exceed 16" << std::endl; }
-
-			std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
-			if (!Out.bad()) {
-				for (auto i : Palettes) {
-					const uint16_t Color = 0;
-					Out.write(reinterpret_cast<const char*>(&Color), sizeof(Color)); //!< 先頭に透明色(ここでは0)を出力
-					Out.write(reinterpret_cast<const char*>(data(i)), size(i) * sizeof(i[0]));
-					for (auto j = size(i); j < 16; j++) {
-						Out.write(reinterpret_cast<const char*>(&Color), sizeof(Color)); //!< 空き要素分(ここでは0)を出力
-					}
-				}
-				Out.close();
-			}
-			return *this;
-		}
-
-		//!< 復元して表示してみる (パレットチェック用)
-		virtual const Converter& RestorePalette() const override {
-#ifdef _DEBUG
-			cv::Mat Res(cv::Size(15, static_cast<int>(size(Palettes))), Image.type());
-			for (auto i = 0; i < size(Palettes); ++i) {
-				for (auto j = 0; j < 15; ++j) {
-					Res.ptr<cv::Vec3b>(i)[j] = j < size(Palettes[i]) ? FromPlatformColor(Palettes[i][j]) : cv::Vec3b();
-				}
-			}
-			Preview("Palette", Res, Res.size() * 50);
-#endif
-			return *this;
-		}
-		//!< 復元して表示してみる (パターンチェック用)
-		virtual const Converter& RestorePattern() const override {
-#ifdef _DEBUG
-			const auto PatCount = static_cast<int>(size(Patterns));
-			cv::Mat Res(cv::Size(16 * W, (PatCount / 16 + 1) * H), Image.type());
-			for (auto p = 0; p < size(Patterns); ++p) {
-				const auto& Pat = Patterns[p];
-				const auto& Pal = Palettes[Pat.PaletteIndex];
-				cv::Mat Tile(cv::Size(W, H), Image.type());
-				for (auto i = 0; i < H; ++i) {
-					for (auto j = 0; j < W; ++j) {
-						Tile.ptr<cv::Vec3b>(i)[j] = FromPlatformColor(Pal[Pat.ColorIndices[i * W + j]]);
-					}
-				}
-				Tile.copyTo(Res(cv::Rect((p % 16) * W, (p / 16) * H, W, H)));
-			}
-
-			DrawGrid(Res, cv::Size(W, H));
-			Preview("Pattern", Res, Res.size() * 5);
-#endif
-			return *this;
-		}
-		//!< 復元して表示してみる (マップチェック用)
-		virtual const Converter& RestoreMap() const override {
-#ifdef _DEBUG
-			cv::Mat Res(Image.size(), Image.type());
-			for (auto m = 0; m < size(Maps); ++m) {
-				const auto& Pat = Patterns[Maps[m]];
-				const auto& Pal = Palettes[Pat.PaletteIndex];
-				cv::Mat Tile(cv::Size(W, H), Image.type());
-				for (auto i = 0; i < H; ++i) {
-					for (auto j = 0; j < W; ++j) {
-						Tile.ptr<cv::Vec3b>(i)[j] = FromPlatformColor(Pal[Pat.ColorIndices[i * W + j]]);
-					}
-				}
-				Tile.copyTo(Res(cv::Rect((m % MapSize.width) * W, (m / MapSize.width) * H, W, H)));
-			}
-
-			DrawGrid(Res, cv::Size(W, H));
-			Preview("Map", Res, Res.size() * 3);
-#endif
-			return *this;
-		}
-
-	private:
-		std::vector<uint32_t> PaletteIndices;
-	protected:
-		cv::Size MapSize;
-		std::vector<Palette> Palettes;
-		std::vector<Pattern<W, H>> Patterns;
+		virtual uint16_t GetPaletteCount() const override { return 16; };
+		virtual uint16_t GetPaletteColorCount() const override { return 16; }
 	};
 
 	//!< イメージ : スクロールさせない静止画向き
@@ -670,12 +661,12 @@ namespace FC {
 	//!<	u8[14] 11111111
 	//!<	u8[15] 11111111
 	template<uint8_t W, uint8_t H>
-	class ConverterBase : public Converter
+	class ConverterBase : public Converter<W, H>
 	{
 	private:
-		using Super = Converter;
+		using Super = Converter<W, H>;
 	public:
-		ConverterBase(const cv::Mat& Img) : Super(Img), MapSize(Image.cols / W, Image.rows / H) {}
+		ConverterBase(const cv::Mat& Img) : Super(Img) {}
 
 		//!< 一番近い色のインデックスを返す
 		virtual uint16_t ToPlatformColor(const cv::Vec3b& Color) const override {
@@ -698,179 +689,23 @@ namespace FC {
 			return cv::Vec3b(0, 0, 0);
 		}
 
-		virtual ConverterBase& CreateMap() override {
-			SplitMap(MapSize, cv::Size(W, H));
-			return *this;
-		}
-		virtual ConverterBase& CreatePalette() override {
-			PaletteIndices.clear();
-			Palettes.clear();
-			for (auto pat : CCPatterns) {
-				Palette Pal;
-				for (auto i = 0; i < pat.rows; ++i) {
-					for (auto j = 0; j < pat.cols; ++j) {
-						const auto Color = ToPlatformColor(pat.ptr<cv::Vec3b>(i)[j]);
-						if (end(Pal) == std::ranges::find(Pal, Color)) {
-							Pal.emplace_back(Color);
-						}
-					}
-				}
-				//!< FC ではパレットに 4 色まで (先頭に透明色が入ることになるので、ここでは 3 色までに収まっていないといけない)
-				if (size(Pal) > 3) { std::cerr << "Color Exceed " << size(Pal) << std::endl; }
-				//!< ソートしておく
-				std::ranges::sort(Pal);
-				//!< 既存でない場合はパレットの追加
-				//!< パターンが使用するパレットインデックスを覚えておく
-				const auto It = std::ranges::find(Palettes, Pal);
-				if (end(Palettes) == It) {
-					PaletteIndices.emplace_back(static_cast<uint32_t>(size(Palettes)));
-					Palettes.emplace_back(Pal);
-				}
-				else {
-					PaletteIndices.emplace_back(static_cast<uint32_t>(std::distance(begin(Palettes), It)));
-				}
-			}
-			return *this;
-		}
-		virtual ConverterBase& OptimizePalette() override {
-			while ([&]() {
-				for (auto i = 0; i < size(Palettes); ++i) {
-					for (auto j = i + 1; j < size(Palettes); ++j) {
-						auto& lhs = Palettes[i];
-						auto& rhs = Palettes[j];
-						if (!empty(lhs) && !empty(rhs)) {
-							Palette UnionSet;
-							std::ranges::set_union(lhs, rhs, std::back_inserter(UnionSet));
-							//!< パレットの和集合が 3 色以下に収まる場合は、一つのパレットにまとめる事が可能
-							if (4 > size(UnionSet)) {
-								lhs.assign(begin(UnionSet), end(UnionSet));
-								rhs.clear();
-								std::ranges::replace(PaletteIndices, j, i);
-								return true;
-							}
-						}
-					}
-				}
-				return false;
-				}()) {
-			}
-			//!< パレット番号を詰める
-				{
-					auto SortUnique = PaletteIndices;
-					std::ranges::sort(SortUnique);
-					const auto [B, E] = std::ranges::unique(SortUnique);
-					SortUnique.erase(B, E);
-					for (auto i = 0; i < size(SortUnique); ++i) {
-						std::ranges::replace(PaletteIndices, SortUnique[i], i);
-					}
-				}
-				//!< 空になったパレットは消す
-				{
-					const auto [B, E] = std::ranges::remove_if(Palettes, [](const Palette& rhs) { return empty(rhs); });
-					Palettes.erase(B, E);
-				}
-				return *this;
-		}
-		virtual ConverterBase& CreatePattern() override {
-			Patterns.clear();
-			for (auto p = 0; p < size(CCPatterns); ++p) {
-				const auto& Pat = CCPatterns[p];
-				Patterns.emplace_back();
-				Patterns.back().PaletteIndex = PaletteIndices[p];
-				const auto& Pal = Palettes[Patterns.back().PaletteIndex];
-				for (auto i = 0; i < Pat.rows; ++i) {
-					for (auto j = 0; j < Pat.cols; ++j) {
-						Patterns.back().ColorIndices[i * W + j] = static_cast<uint32_t>(std::distance(begin(Pal), std::ranges::find(Pal, ToPlatformColor(Pat.ptr<cv::Vec3b>(i)[j]))));
-					}
-				}
-			}
-			return *this;
-		}
-
-		virtual const Converter& OutputPalette(std::string_view Path) const override {
-			std::cout << "\tPalette count = " << size(Palettes) << std::endl;
-			//!< FC ではパレット数 4 まで (BG、スプライトそれぞれ 4)
-			if (size(Palettes) > 4) { std::cerr << "\tPalette Exceed 4" << std::endl; }
-
-			std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
-			if (!Out.bad()) {
-				for (auto i : Palettes) {
-					const uint16_t Color = 0;
-					Out.write(reinterpret_cast<const char*>(&Color), sizeof(Color)); //!< 先頭に透明色(ここでは0)を出力
-					Out.write(reinterpret_cast<const char*>(data(i)), size(i) * sizeof(i[0]));
-					for (auto j = size(i); j < 4; j++) {
-						Out.write(reinterpret_cast<const char*>(&Color), sizeof(Color)); //!< 空き要素分(ここでは0)を出力
-					}
-				}
-				Out.close();
-			}
-			return *this;
-		}
-
-		//!< 復元して表示してみる (パレットチェック用)
-		virtual const Converter& RestorePalette() const override {
-#ifdef _DEBUG
-			cv::Mat Res(cv::Size(4, static_cast<int>(size(Palettes))), Image.type());
-			for (auto i = 0; i < size(Palettes); ++i) {
-				for (auto j = 0; j < 4; ++j) {
-					Res.ptr<cv::Vec3b>(i)[j] = j < size(Palettes[i]) ? FromPlatformColor(Palettes[i][j]) : cv::Vec3b();
-				}
-			}
-			Preview("Palette", Res, Res.size() * 50);
-#endif
-			return *this;
-		}
-		//!< 復元して表示してみる (パターンチェック用)
-		virtual const Converter& RestorePattern() const override {
-#ifdef _DEBUG
-			const auto PatCount = static_cast<int>(size(Patterns));
-			cv::Mat Res(cv::Size(16 * W, (PatCount / 16 + 1) * H), Image.type());
-			for (auto p = 0; p < size(Patterns); ++p) {
-				const auto& Pat = Patterns[p];
-				const auto& Pal = Palettes[Pat.PaletteIndex];
-				cv::Mat Tile(cv::Size(W, H), Image.type());
-				for (auto i = 0; i < H; ++i) {
-					for (auto j = 0; j < W; ++j) {
-						Tile.ptr<cv::Vec3b>(i)[j] = FromPlatformColor(Pal[Pat.ColorIndices[i * W + j]]);
-					}
-				}
-				Tile.copyTo(Res(cv::Rect((p % 16) * W, (p / 16) * H, W, H)));
-			}
-
-			DrawGrid(Res, cv::Size(W, H));
-			Preview("Pattern", Res, Res.size() * 5);
-#endif
-			return *this;
-		}
-		//!< 復元して表示してみる (マップチェック用)
-		virtual const Converter& RestoreMap() const override {
-#ifdef _DEBUG
-			cv::Mat Res(Image.size(), Image.type());
-			for (auto m = 0; m < size(Maps); ++m) {
-				const auto& Pat = Patterns[Maps[m]];
-				const auto& Pal = Palettes[Pat.PaletteIndex];
-				cv::Mat Tile(cv::Size(W, H), Image.type());
-				for (auto i = 0; i < H; ++i) {
-					for (auto j = 0; j < W; ++j) {
-						Tile.ptr<cv::Vec3b>(i)[j] = FromPlatformColor(Pal[Pat.ColorIndices[i * W + j]]);
-					}
-				}
-				Tile.copyTo(Res(cv::Rect((m % MapSize.width) * W, (m / MapSize.width) * H, W, H)));
-			}
-
-			DrawGrid(Res, cv::Size(W, H));
-			Preview("Map", Res, Res.size() * 3);
-#endif
-			return *this;
-		}
-
-	private:
-		std::vector<uint32_t> PaletteIndices;
-	protected:
-		cv::Size MapSize;
-		std::vector<Palette> Palettes;
-		std::vector<Pattern<W, H>> Patterns;
+		virtual uint16_t GetPaletteCount() const override { return 4; };
+		virtual uint16_t GetPaletteColorCount() const override { return 4; }
 	};
+
+	//!< BG
+	//!< 2 プレーンに分けて出力、2 プレーンを合わせるとカラーインデックスが求まる
+	//!< アトリビュート
+	//!<	パレット番号はセル毎に持つことはできず、2 x 2 セルでまとめて 1 パレット番号となる
+	//!<	1 つの u8 で 4 x 4 セルを表し、各々の 2 ビットが 2 x 2 セルを表す
+	//!<	(最初の 2 ビットが LT、続いて RT、LB、RB)
+	//!<	01 23
+	//!<	45 67
+	template<uint8_t W = 8, uint8_t H = 8>
+	class BGConverter : public ConverterBase<W, H>
+	{
+	};
+
 	//!< スプライト
 	//!< 2 プレーンに分けて出力、2 プレーンを合わせるとカラーインデックスが求まる
 	template<uint8_t W = 8, uint8_t H = 8>
