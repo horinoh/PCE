@@ -12,6 +12,6 @@ main()
   load_background(Pattern, Palette, BAT, SCREEN_CELLS_W, SCREEN_CELLS_H);
 
   while(1){
-    vsync();
+    vsync();  
   }
 }
