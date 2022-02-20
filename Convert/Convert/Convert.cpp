@@ -135,6 +135,7 @@ public:
 			for (auto j = 0; j < MapSize.width; ++j) {
 				const cv::Mat cvPat = Image(cv::Rect(j * W, i * H, W, H));
 #if 0
+				//!< 反転して既存になるものは追加しない #TODO
 				cv::Mat cvPatV, cvPatH, cvPatVH;
 				cv::flip(cvPat, cvPatV, 0);
 				cv::flip(cvPat, cvPatH, 1);
@@ -269,6 +270,7 @@ public:
 #pragma endregion
 
 #pragma region OUTPUT
+	//!< 型を指定してのパレット出力
 	template<typename T>
 	void OutputPaletteOfType(std::string_view Path) const {
 		std::cout << "\tPalette count = " << size(Palettes) << std::endl;
@@ -277,6 +279,8 @@ public:
 		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 		if (!Out.bad()) {
 			for (auto i : Palettes) {
+				std::cout << "\t\tPalette color count = " << size(i) << std::endl;
+
 				const T TransparentColor = 0; //!< 先頭は透明色 (ここでは 0 としている)
 
 				//!< 出力用の型へ変換
@@ -298,6 +302,18 @@ public:
 	}
 	virtual const Converter& OutputPalette(std::string_view Path) const { return *this; }
 	virtual const Converter& OutputPattern(std::string_view Path) const { return *this; }
+	virtual const Converter& OutputAnimation(std::string_view Path) const {
+		std::cout << "\tSprite count = " << size(Map) << std::endl;
+		std::cout << "\tMax animation count = " << size(Map[0]) << std::endl;
+		for (const auto& r : Map) {
+			std::cout << "\t\tSprite animations = ";
+			for (const auto& c : r) {
+				std::cout << c.PatternIndex << ", ";
+			}
+			std::cout << std::endl;
+		}
+		return *this;
+	}
 #pragma endregion
 
 #pragma region RESTORE
@@ -632,7 +648,7 @@ namespace PCE
 				if (!Out.bad()) {
 					for (auto p : this->Patterns) {
 						//!< パターン毎のパレットインデックス情報を出力
-						std::cout << "\t PaletteIndex = " << p.PaletteIndex << std::endl;
+						std::cout << "\t\tPalette index = " << p.PaletteIndex << std::endl;
 
 						//!< 4 プレーン
 						for (auto pl = 0; pl < 4; ++pl) {
@@ -789,6 +805,67 @@ namespace FC {
 		template<uint8_t W = 8, uint8_t H = 8>
 		class Converter : public ConverterBase<W, H>
 		{
+		private:
+			using Super = ConverterBase<W, H>;
+		public:
+			Converter(const cv::Mat& Img) : Super(Img) {}
+
+			virtual Converter& Create() override { Super::Create(); return *this; }
+			
+			virtual const Converter& OutputMap(std::string_view Path) const {
+				std::cout << "\tMap size = " << size(this->Map[0]) << " x " << size(this->Map) << std::endl;
+				std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+				if (!Out.bad()) {
+					for (const auto& r : this->Map) {
+						for (const auto& c : r) {
+							const auto PatIdx8 = static_cast<uint8_t>(c.PatternIndex);
+							Out.write(reinterpret_cast<const char*>(&PatIdx8), sizeof(PatIdx8));
+						}
+					}
+					Out.close();
+				}
+				return *this;
+			}
+			virtual const Converter& OutputBAT(std::string_view Path) const {
+				std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
+				if (!Out.bad()) {
+					//!< 4 x 4 分を 1 つの uint8_t で指定
+					for (auto i = 0; i < size(this->Map); i+=4) {
+						for (auto j = 0; j < size(this->Map[i]); j+=4) {
+							//!< 2 x 2 分を uint8_t の 2 ビットで指定 (この 2 x 2 分は同じパレット番号でないといけない)
+							const auto LTLT = static_cast<uint8_t>(this->Map[i + 0][j + 0].PatternIndex);
+							const auto LTRT = static_cast<uint8_t>(this->Map[i + 0][j + 1].PatternIndex);
+							const auto LTLB = static_cast<uint8_t>(this->Map[i + 1][j + 0].PatternIndex);
+							const auto LTRB = static_cast<uint8_t>(this->Map[i + 1][j + 1].PatternIndex);
+							//!< 2 x 2 分が同じパレット番号になっていない場合 assert
+							assert(this->Patterns[LTLT].PaletteIndex == this->Patterns[LTRT].PaletteIndex == this->Patterns[LTLB].PaletteIndex == this->Patterns[LTRB].PaletteIndex);
+
+							const auto RTLT = static_cast<uint8_t>(this->Map[i + 0][j + 2].PatternIndex);
+							const auto RTRT = static_cast<uint8_t>(this->Map[i + 0][j + 3].PatternIndex);
+							const auto RTLB = static_cast<uint8_t>(this->Map[i + 1][j + 2].PatternIndex);
+							const auto RTRB = static_cast<uint8_t>(this->Map[i + 1][j + 3].PatternIndex);
+							assert(this->Patterns[RTLT].PaletteIndex == this->Patterns[RTRT].PaletteIndex == this->Patterns[RTLB].PaletteIndex == this->Patterns[RTRB].PaletteIndex);
+
+							const auto LBLT = static_cast<uint8_t>(this->Map[i + 2][j + 0].PatternIndex);
+							const auto LBRT = static_cast<uint8_t>(this->Map[i + 2][j + 1].PatternIndex);
+							const auto LBLB = static_cast<uint8_t>(this->Map[i + 3][j + 0].PatternIndex);
+							const auto LBRB = static_cast<uint8_t>(this->Map[i + 3][j + 1].PatternIndex);
+							assert(this->Patterns[LBLT].PaletteIndex == this->Patterns[LBRT].PaletteIndex == this->Patterns[LBLB].PaletteIndex == this->Patterns[LBRB].PaletteIndex);
+
+							const auto RBLT = static_cast<uint8_t>(this->Map[i + 2][j + 2].PatternIndex);
+							const auto RBRT = static_cast<uint8_t>(this->Map[i + 2][j + 3].PatternIndex);
+							const auto RBLB = static_cast<uint8_t>(this->Map[i + 3][j + 2].PatternIndex);
+							const auto RBRB = static_cast<uint8_t>(this->Map[i + 3][j + 3].PatternIndex);
+							assert(this->Patterns[RBLT].PaletteIndex == this->Patterns[RBRT].PaletteIndex == this->Patterns[RBLB].PaletteIndex == this->Patterns[RBRB].PaletteIndex);
+
+							const uint8_t BAT = (this->Patterns[RBLT].PaletteIndex << 6) | (this->Patterns[LBLT].PaletteIndex << 4) | (this->Patterns[RTLT].PaletteIndex << 2) | this->Patterns[LTLT].PaletteIndex;
+							Out.write(reinterpret_cast<const char*>(&BAT), sizeof(BAT));
+						}
+					}
+					Out.close();
+				}
+				return *this;
+			}
 		};
 	}
 	namespace Sprite
@@ -810,19 +887,19 @@ namespace FC {
 				std::cout << "\tSprite size = " << static_cast<uint16_t>(W) << " x " << static_cast<uint16_t>(H) << std::endl;
 				std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
 				if (!Out.bad()) {
-					for (auto pat : this->_Patterns) {
-						//!< パターン毎のパレットインデックス
-						std::cout << "\t Palette = " << pat.PaletteIndex << std::endl;
-						//std::cout << "//!< Pattern " << std::endl;
+					for (auto p : this->Patterns) {
+						//!< パターン毎のパレットインデックス情報を出力
+						std::cout << "\t\tPalette index = " << p.PaletteIndex << std::endl;
+
+						//!< 2 プレーン
 						for (auto pl = 0; pl < 2; ++pl) {
-							//std::cout << "\t//!< Plane " << pl << std::endl;
-							for (auto i = 0; i < H; ++i) {
-								uint16_t Plane = 0;
-								for (auto j = 0; j < W; ++j) {
-									const auto ColIdx = pat.ColorIndices[i * W + j] + 1; //!< 先頭の透明色を考慮して + 1
+							for (const auto& i : p.ColorIndices) {
+								uint8_t Plane = 0;
+								for (auto j = 0; j < size(i); ++j) {
+									const auto ColorIndex = i[j] + 1; //!< 先頭の透明色を考慮して + 1
 									const auto Shift = 7 - j;
 									const auto Mask = 1 << pl;
-									Plane |= ((ColIdx & Mask) ? 1 : 0) << Shift;
+									Plane |= ((ColorIndex & Mask) ? 1 : 0) << Shift;
 								}
 								Out.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
 								//std::cout << "\t0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane << "," << std::endl;
@@ -841,8 +918,8 @@ namespace FC {
 #pragma region GB
 /*
 * 画面		: 160 x 144
-* BG		: 256 x 256、4 諧調モノクロ
-* スプライト	: 40 枚、4 諧調モノクロ
+* BG		: 256 x 256、パターン 8 x 8 x 128 種(+ 共用分が 128 種ある)、4 諧調モノクロ
+* スプライト	: 40 枚、パターン 8 x 8 x 128 種(+ 共用分が 128 種ある)。4 諧調モノクロ
 */
 namespace GB
 {
@@ -914,13 +991,13 @@ static void ProcessSprite(std::string_view Name, std::string_view File, const ui
 		case 16:
 			switch (Height << 3) {
 			case 16: 
-				PCE::Sprite::Converter<16, 16>(Image).Create().OutputPattern(std::string(Name) + ".bin").RestorePattern();
+				PCE::Sprite::Converter<16, 16>(Image).Create().OutputPattern(std::string(Name) + ".bin").OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
 				break;
 			case 32:
-				PCE::Sprite::Converter<16, 32>(Image).Create().OutputPattern(std::string(Name) + ".bin").RestorePattern();
+				PCE::Sprite::Converter<16, 32>(Image).Create().OutputPattern(std::string(Name) + ".bin").OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
 				break;
 			case 64:
-				PCE::Sprite::Converter<16, 64>(Image).Create().OutputPattern(std::string(Name) + ".bin").RestorePattern();
+				PCE::Sprite::Converter<16, 64>(Image).Create().OutputPattern(std::string(Name) + ".bin").OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
 				break;
 			default: break;
 			}
@@ -928,13 +1005,13 @@ static void ProcessSprite(std::string_view Name, std::string_view File, const ui
 		case 32:
 			switch (Height << 3) {
 			case 16:
-				PCE::Sprite::Converter<32, 16>(Image).Create().OutputPattern(std::string(Name) + ".bin").RestorePattern();
+				PCE::Sprite::Converter<32, 16>(Image).Create().OutputPattern(std::string(Name) + ".bin").OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
 				break;
 			case 32:
-				PCE::Sprite::Converter<32, 32>(Image).Create().OutputPattern(std::string(Name) + ".bin").RestorePattern();
+				PCE::Sprite::Converter<32, 32>(Image).Create().OutputPattern(std::string(Name) + ".bin").OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
 				break;
 			case 64:
-				PCE::Sprite::Converter<32, 64>(Image).Create();
+				PCE::Sprite::Converter<32, 64>(Image).Create().OutputPattern(std::string(Name) + ".bin").OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
 				break;
 			default: break;
 			}
