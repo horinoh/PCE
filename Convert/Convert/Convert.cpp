@@ -99,7 +99,8 @@ public:
 	class Pattern 
 	{
 	public:
-		uint32_t PaletteIndex = 0;
+		bool HasValidPaletteIndex() const { return 0xffffffff != PaletteIndex; }
+		uint32_t PaletteIndex = 0xffffffff;
 		PatternEntity ColorIndices;
 	};
 
@@ -114,7 +115,16 @@ public:
 		}
 		return lhs;
 	}
-	
+	virtual Pattern& ToIndexColorPattern(Pattern& Pat, const uint32_t PalIdx, const PatternEntity& ColPat) {
+		const auto& Pal = Palettes[(Pat.PaletteIndex = PalIdx)];
+		for (auto i = 0; i < size(ColPat); ++i) {
+			for (auto j = 0; j < size(ColPat[i]); ++j) {
+				Pat.ColorIndices[i][j] = static_cast<uint32_t>(std::distance(begin(Pal), std::ranges::find(Pal, ColPat[i][j])));
+			}
+		}
+		return Pat;
+	}
+
 	virtual uint16_t GetPaletteCount() const = 0;
 	virtual uint16_t GetPaletteColorCount() const = 0;
 
@@ -128,6 +138,7 @@ public:
 		CreatePattern();
 		return *this;
 	}
+
 	virtual Converter& CreateMap() { 
 		const auto MapSize = GetMapSize();
 		for (auto i = 0; i < MapSize.height; ++i) {
@@ -164,20 +175,22 @@ public:
 		return *this; 
 	}
 
+	void AddPatternColorToPalette(Palette& Pal, const PatternEntity& Pat) 
+	{
+		for (auto i : Pat) {
+			for (auto j : i) {
+				if (end(Pal) == std::ranges::find(Pal, j)) {
+					Pal.emplace_back(j);
+				}
+			}
+		}
+	}
 	//!< パターン毎に 1 パレットとするケース
 	void CreatePalettePerPattern() {
 		Palettes.clear();
 		for (const auto& p : ColorPatterns) {
 			auto& Pal = Palettes.emplace_back();
-			{
-				for (auto i : p) {
-					for (auto j : i) {
-						if (end(Pal) == std::ranges::find(Pal, j)) {
-							Pal.emplace_back(j);
-						}
-					}
-				}
-			}
+			AddPatternColorToPalette(Pal, p);
 			if (size(Pal) > GetPaletteColorCount() - 1) { std::cerr << "Color Exceed " << size(Pal) << std::endl; }
 
 			std::ranges::sort(Pal);
@@ -188,24 +201,87 @@ public:
 		Palettes.clear();
 		for (const auto& r : Map) {
 			auto& Pal = Palettes.emplace_back();
-			{
-				for (const auto& c : r) {
-					const auto& p = ColorPatterns[c.PatternIndex];
-					for (auto i : p) {
-						for (auto j : i) {
-							if (end(Pal) == std::ranges::find(Pal, j)) {
-								Pal.emplace_back(j);
-							}
-						}
-					}
-				}
-			}
-			if (size(Pal) > GetPaletteColorCount() - 1) { std::cerr << "Color Exceed " << size(Pal) << std::endl; }
 
+			//!< 列は同じパレットを使わなければならない
+			for (const auto& c : r) {
+				AddPatternColorToPalette(Pal, ColorPatterns[c.PatternIndex]);
+			}
+
+			if (size(Pal) > GetPaletteColorCount() - 1) { std::cerr << "Color Exceed " << size(Pal) << std::endl; }
 			std::ranges::sort(Pal);
 		}
 	}
+	//!< マップの 2 x 2 毎に 1 パレットとするケース
+	void CreatePalettePerMap2x2() {
+		Palettes.clear();
+		for (auto i = 0; i < size(Map); i += 2) {
+			for (auto j = 0; j < size(Map[i]); j += 2) {
+				auto& Pal = Palettes.emplace_back();
+
+				//!< 2 x 2 部分は同じパレットを使わなければならない
+				AddPatternColorToPalette(Pal, ColorPatterns[Map[i + 0][j + 0].PatternIndex]);
+				AddPatternColorToPalette(Pal, ColorPatterns[Map[i + 0][j + 1].PatternIndex]);
+				AddPatternColorToPalette(Pal, ColorPatterns[Map[i + 1][j + 0].PatternIndex]);
+				AddPatternColorToPalette(Pal, ColorPatterns[Map[i + 1][j + 1].PatternIndex]);
+
+				if (size(Pal) > GetPaletteColorCount() - 1) { std::cerr << "Color Exceed " << size(Pal) << std::endl; }
+				std::ranges::sort(Pal);
+			}
+		}
+	}
+#if 1
 	virtual Converter& CreatePalette() { CreatePalettePerPattern(); return *this; }
+#elif 0
+	virtual Converter& CreatePalette() { CreatePalettePerMapRow(); return *this; }
+#else
+	virtual Converter& CreatePalette() { CreatePalettePerMap2x2(); return *this; }
+#endif
+
+	void CreatePattern(const std::vector<uint32_t>& PalInds) {
+		Patterns.reserve(size(ColorPatterns));
+		for (auto i = 0; i < size(ColorPatterns); ++i) {
+			ToIndexColorPattern(Patterns.emplace_back(), PalInds[i], ColorPatterns[i]);
+		}
+	}
+	void CreatePatternPerMapRow(const std::vector<uint32_t>& PalInds) {
+		Patterns.resize(size(ColorPatterns));
+
+		for (auto i = 0; i < size(Map); ++i) {
+			const auto PalInd = PalInds[PalInds[i]];
+			for (auto j : Map[i]) {
+				if (!Patterns[j.PatternIndex].HasValidPaletteIndex()) {
+					ToIndexColorPattern(Patterns[j.PatternIndex], PalInd, ColorPatterns[j.PatternIndex]);
+				}
+			}
+		}
+	}
+	void CreatePatternPerMap2x2(const std::vector<uint32_t>& PalInds) {
+		Patterns.resize(size(ColorPatterns));
+
+		auto k = 0;
+		for (auto i = 0; i < size(Map); i += 2) {
+			for (auto j = 0; j < size(Map[i]); j += 2) {
+				const auto PalInd = PalInds[PalInds[k++]];
+
+				auto PatInd = Map[i + 0][j + 0].PatternIndex;
+				if (!Patterns[PatInd].HasValidPaletteIndex()) {
+					ToIndexColorPattern(Patterns[PatInd], PalInd, ColorPatterns[PatInd]);
+				}
+				PatInd = Map[i + 0][j + 1].PatternIndex;
+				if (!Patterns[PatInd].HasValidPaletteIndex()) {
+					ToIndexColorPattern(Patterns[PatInd], PalInd, ColorPatterns[PatInd]);
+				}
+				PatInd = Map[i + 1][j + 0].PatternIndex;
+				if (!Patterns[PatInd].HasValidPaletteIndex()) {
+					ToIndexColorPattern(Patterns[PatInd], PalInd, ColorPatterns[PatInd]);
+				}
+				PatInd = Map[i + 1][j + 1].PatternIndex;
+				if (!Patterns[PatInd].HasValidPaletteIndex()) {
+					ToIndexColorPattern(Patterns[PatInd], PalInd, ColorPatterns[PatInd]);
+				}
+			}
+		}
+	}
 	virtual Converter& CreatePattern() {
 		std::vector<uint32_t> PaletteIndices(size(Palettes));
 		std::iota(begin(PaletteIndices), end(PaletteIndices), 0);
@@ -250,21 +326,13 @@ public:
 
 		//!< インデックスカラーのパターンを作成
 		Patterns.clear();
-		for (auto p = 0; p < size(ColorPatterns); ++p) {
-			const auto& CPat = ColorPatterns[p];
-
-			auto& Pat = Patterns.emplace_back();
-			Pat.PaletteIndex = PaletteIndices[p];
-			
-			const auto& Pal = Palettes[Pat.PaletteIndex];
-			
-			for (auto i = 0; i < size(CPat); ++i) {
-				for (auto j = 0; j < size(CPat[i]); ++j) {
-					Pat.ColorIndices[i][j] = static_cast<uint32_t>(std::distance(begin(Pal), std::ranges::find(Pal, CPat[i][j])));
-				}
-			}
-		}
-
+#if 1
+		CreatePattern(PaletteIndices);
+#elif 0
+		CreatePatternPerMapRow(PaletteIndices);
+#else
+		CreatePatternPerMap2x2(PaletteIndices);
+#endif
 		return *this;
 	}
 #pragma endregion
@@ -272,33 +340,48 @@ public:
 #pragma region OUTPUT
 	//!< 型を指定してのパレット出力
 	template<typename T>
-	void OutputPaletteOfType(std::string_view Path) const {
+	void OutputPaletteOfType(std::string_view Name) const {
 		std::cout << "\tPalette count = " << size(Palettes) << std::endl;
 		if (size(Palettes) > GetPaletteCount()) { std::cerr << "\tPalette Exceed" << std::endl; }
 
-		std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
-		if (!Out.bad()) {
-			for (auto i : Palettes) {
-				std::cout << "\t\tPalette color count = " << size(i) << std::endl;
+		std::ofstream OutBin(data(std::string(Name) + ".bin"), std::ios::binary | std::ios::out);
+		assert(!OutBin.bad());
+		std::ofstream OutText(data(std::string(Name) + ".txt"), std::ios::out);
+		assert(!OutText.bad());
 
-				const T TransparentColor = 0; //!< 先頭は透明色 (ここでは 0 としている)
+		//OutText << "const " << typeid(T).name() << " " << Name << "[] = {" << std::endl;
+		OutText << "const u" << (sizeof(T) << 3) << " " << Name << "[] = {" << std::endl;
 
-				//!< 出力用の型へ変換
-				std::vector<T> PalOut;
-				{
-					PalOut.emplace_back(TransparentColor); //!< 透明色
-					std::ranges::copy(i, std::back_inserter(PalOut));
-					//!< 空きも透明色で埋める
-					for (auto j = size(PalOut); j < GetPaletteColorCount(); j++) {
-						PalOut.emplace_back(TransparentColor);
-					}
+		for (auto i : Palettes) {
+			std::cout << "\t\tPalette color count = " << size(i) << std::endl;
+
+			const T TransparentColor = 0; //!< 先頭は透明色 (ここでは 0 としている)
+
+			//!< 出力用の型へ変換
+			std::vector<T> PalOut;
+			{
+				PalOut.emplace_back(TransparentColor); //!< 透明色
+				std::ranges::copy(i, std::back_inserter(PalOut));
+				//!< 空きも透明色で埋める
+				for (auto j = size(PalOut); j < GetPaletteColorCount(); j++) {
+					PalOut.emplace_back(TransparentColor);
 				}
-
-				//!< 出力
-				Out.write(reinterpret_cast<const char*>(data(PalOut)), size(PalOut) * sizeof(PalOut[0]));
 			}
-			Out.close();
+
+			//!< 出力
+			OutText << "\t";
+			for (auto j = 0; j < size(PalOut); ++j) {
+				OutText << "0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << PalOut[j];
+				if (size(PalOut) - 1 != j) { OutText << ", "; }
+			}
+			OutText << std::endl;
+
+			OutBin.write(reinterpret_cast<const char*>(data(PalOut)), size(PalOut) * sizeof(PalOut[0]));
 		}
+		OutText << "};" << std::endl;
+
+		OutBin.close();
+		OutText.close();
 	}
 	virtual const Converter& OutputPalette(std::string_view Path) const { return *this; }
 	virtual const Converter& OutputPattern(std::string_view Path) const { return *this; }
@@ -336,6 +419,7 @@ public:
 		cv::Mat Res(cv::Size(ColumnCount * W, (PatCount / ColumnCount + 1) * H), Image.type());
 		for (auto p = 0; p < size(Patterns); ++p) {
 			const auto& Pat = Patterns[p];
+			assert(Pat.HasValidPaletteIndex());
 			const auto& Pal = Palettes[Pat.PaletteIndex];
 			cv::Mat cvPat(cv::Size(W, H), Image.type());
 			for (auto i = 0; i < H; ++i) {
@@ -360,6 +444,7 @@ public:
 				const auto& MapEnt = Map[r][c];
 
 				const auto& Pat = Patterns[MapEnt.PatternIndex];
+				assert(Pat.HasValidPaletteIndex());
 				//MapEnt.Flags; //!< 反転情報等
 
 				cv::Mat cvPat(cv::Size(W, H), Image.type());
@@ -442,29 +527,33 @@ namespace PCE
 
 			virtual Converter& Create() override { Super::Create(); return *this; }
 
-			virtual const Converter& OutputPattern(std::string_view Path) const override {
+			virtual const Converter& OutputPattern(std::string_view Name) const override {
 				std::cout << "\tPattern count = " << size(this->Patterns) << std::endl;
-				std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
-				if (!Out.bad()) {
-					for (auto p : this->Patterns) {
-						//!< 2 プレーン
-						for (auto pl = 0; pl < 2; ++pl) {
-							for (const auto& i : p.ColorIndices) {
-								uint16_t Plane = 0;
-								for (auto j = 0; j < size(i); ++j) {
-									const auto ColorIndex = i[j] + 1; //!< 先頭の透明色を考慮して + 1
-									const auto ShiftL = 7 - j;
-									const auto ShiftU = ShiftL + 8;
-									const auto MaskL = 1 << ((pl << 1) + 0);
-									const auto MaskU = 1 << ((pl << 1) + 1);
-									Plane |= ((ColorIndex & MaskL) ? 1 : 0) << ShiftL;
-									Plane |= ((ColorIndex & MaskU) ? 1 : 0) << ShiftU;
-								}
-								Out.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
+
+				std::ofstream OutBin(data(std::string(Name) + ".bin"), std::ios::binary | std::ios::out);
+				assert(!OutBin.bad());
+				std::ofstream OutText(data(std::string(Name) + ".txt"), std::ios::out);
+				assert(!OutText.bad());
+
+				for (auto p : this->Patterns) {
+					//!< 2 プレーン
+					for (auto pl = 0; pl < 2; ++pl) {
+						for (const auto& i : p.ColorIndices) {
+							uint16_t Plane = 0;
+							for (auto j = 0; j < size(i); ++j) {
+								const auto ColorIndex = i[j] + 1; //!< 先頭の透明色を考慮して + 1
+								const auto ShiftL = 7 - j;
+								const auto ShiftU = ShiftL + 8;
+								const auto MaskL = 1 << ((pl << 1) + 0);
+								const auto MaskU = 1 << ((pl << 1) + 1);
+								Plane |= ((ColorIndex & MaskL) ? 1 : 0) << ShiftL;
+								Plane |= ((ColorIndex & MaskU) ? 1 : 0) << ShiftU;
 							}
+							OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
 						}
 					}
-					Out.close();
+					OutBin.close();
+					OutText.close();
 				}
 				return *this;
 			}
@@ -475,6 +564,7 @@ namespace PCE
 				if (!Out.bad()) {
 					for (const auto& r : this->Map) {
 						for (const auto& c : r) {
+							assert(this->Patterns[c.PatternIndex].HasValidPaletteIndex());
 							//!< アプリから使用できるパターンインデックスは 256 以降 [256, 4095] なのでオフセット
 							const uint16_t BAT = (this->Patterns[c.PatternIndex].PaletteIndex << 12) | (c.PatternIndex + 256); 
 							Out.write(reinterpret_cast<const char*>(&BAT), sizeof(BAT));
@@ -603,7 +693,8 @@ namespace PCE
 				if (!Out.bad()) {
 					for (auto p : this->Patterns) {
 						//!< パターン毎のパレットインデックス (4 ビットシフトする必要がある)
-						const uint8_t PalIdx = p.PaletteIndex << 4; 
+						assert(p.HasValidPaletteIndex());
+						const uint8_t PalIdx = p.PaletteIndex << 4;
 						Out.write(reinterpret_cast<const char*>(&PalIdx), sizeof(PalIdx));
 					}
 					Out.close();
@@ -648,6 +739,7 @@ namespace PCE
 				if (!Out.bad()) {
 					for (auto p : this->Patterns) {
 						//!< パターン毎のパレットインデックス情報を出力
+						assert(p.HasValidPaletteIndex());
 						std::cout << "\t\tPalette index = " << p.PaletteIndex << std::endl;
 
 						//!< 4 プレーン
@@ -858,6 +950,10 @@ namespace FC {
 							const auto RBRB = static_cast<uint8_t>(this->Map[i + 3][j + 3].PatternIndex);
 							assert(this->Patterns[RBLT].PaletteIndex == this->Patterns[RBRT].PaletteIndex == this->Patterns[RBLB].PaletteIndex == this->Patterns[RBRB].PaletteIndex);
 
+							assert(this->Patterns[RBLT].HasValidPaletteIndex());
+							assert(this->Patterns[LBLT].HasValidPaletteIndex());
+							assert(this->Patterns[RTLT].HasValidPaletteIndex());
+							assert(this->Patterns[LTLT].HasValidPaletteIndex());
 							const uint8_t BAT = (this->Patterns[RBLT].PaletteIndex << 6) | (this->Patterns[LBLT].PaletteIndex << 4) | (this->Patterns[RTLT].PaletteIndex << 2) | this->Patterns[LTLT].PaletteIndex;
 							Out.write(reinterpret_cast<const char*>(&BAT), sizeof(BAT));
 						}
@@ -940,9 +1036,9 @@ static void ProcessPalette(std::string_view Name, std::string_view File)
 
 #pragma region PCE
 #if 0
-		PCE::Image::Converter<>(Image).Create().OutputPalette(std::string(Name) + ".bin").RestorePalette();
+		PCE::Image::Converter<>(Image).Create().OutputPalette(Name).RestorePalette();
 #else
-		PCE::BG::Converter<>(Image).Create().OutputPalette(std::string(Name) + ".bin").RestorePalette();
+		PCE::BG::Converter<>(Image).Create().OutputPalette(Name).RestorePalette();
 #endif
 #pragma endregion
 	}
@@ -957,7 +1053,7 @@ static void ProcessTileSet(std::string_view Name, std::string_view File, [[maybe
 		//!< イメージの場合はパターンが全部異なったりするので、マップ(BAT) を復元するのと大して変わらない
 		PCE::Image::Converter<>(Image).Create().OutputPattern(std::string(Name) + ".bin");
 #else
-		PCE::BG::Converter<>(Image).Create().OutputPattern(std::string(Name) + ".bin").RestorePattern();
+		PCE::BG::Converter<>(Image).Create().OutputPattern(Name).RestorePattern();
 		std::cout << "[ Output PatternPalette ] " << Name << ".pal" << " (" << File << ")" << std::endl;
 		PCE::BG::Converter<>(Image).Create().OutputPatternPalette(std::string(Name) + ".pal.bin");
 #endif
@@ -991,13 +1087,13 @@ static void ProcessSprite(std::string_view Name, std::string_view File, const ui
 		case 16:
 			switch (Height << 3) {
 			case 16: 
-				PCE::Sprite::Converter<16, 16>(Image).Create().OutputPattern(std::string(Name) + ".bin").OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
+				PCE::Sprite::Converter<16, 16>(Image).Create().OutputPattern(Name).OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
 				break;
 			case 32:
-				PCE::Sprite::Converter<16, 32>(Image).Create().OutputPattern(std::string(Name) + ".bin").OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
+				PCE::Sprite::Converter<16, 32>(Image).Create().OutputPattern(Name).OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
 				break;
 			case 64:
-				PCE::Sprite::Converter<16, 64>(Image).Create().OutputPattern(std::string(Name) + ".bin").OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
+				PCE::Sprite::Converter<16, 64>(Image).Create().OutputPattern(Name).OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
 				break;
 			default: break;
 			}
@@ -1005,13 +1101,13 @@ static void ProcessSprite(std::string_view Name, std::string_view File, const ui
 		case 32:
 			switch (Height << 3) {
 			case 16:
-				PCE::Sprite::Converter<32, 16>(Image).Create().OutputPattern(std::string(Name) + ".bin").OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
+				PCE::Sprite::Converter<32, 16>(Image).Create().OutputPattern(Name).OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
 				break;
 			case 32:
-				PCE::Sprite::Converter<32, 32>(Image).Create().OutputPattern(std::string(Name) + ".bin").OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
+				PCE::Sprite::Converter<32, 32>(Image).Create().OutputPattern(Name).OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
 				break;
 			case 64:
-				PCE::Sprite::Converter<32, 64>(Image).Create().OutputPattern(std::string(Name) + ".bin").OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
+				PCE::Sprite::Converter<32, 64>(Image).Create().OutputPattern(Name).OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
 				break;
 			default: break;
 			}
