@@ -371,7 +371,7 @@ public:
 			//!< 出力
 			OutText << "\t";
 			for (auto j = 0; j < size(PalOut); ++j) {
-				OutText << "0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << PalOut[j];
+				OutText << "0x" << std::hex << std::setw(sizeof(PalOut[j]) << 1) << std::right << std::setfill('0') << PalOut[j];
 				if (size(PalOut) - 1 > j) { OutText << ", "; }
 			}
 			OutText << std::endl;
@@ -554,7 +554,7 @@ namespace PCE
 								Plane |= ((ColorIndex & MaskL) ? 1 : 0) << ShiftL;
 								Plane |= ((ColorIndex & MaskU) ? 1 : 0) << ShiftU;
 							}
-							OutText << "0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane;
+							OutText << "0x" << std::hex << std::setw(sizeof(Plane) << 1) << std::right << std::setfill('0') << Plane;
 							if (size(this->Patterns) - 1 > pat || 1 > pl || size(Pat.ColorIndices) - 1 > i) { OutText << ", "; }
 
 							OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
@@ -570,20 +570,37 @@ namespace PCE
 				return *this;
 			}
 			//!< BAT はパターン番号とパレット番号からなるマップ
-			virtual const Converter& OutputBAT(std::string_view Path) const {
+			virtual const Converter& OutputBAT(std::string_view Name) const {
 				std::cout << "\tBAT size = " << size(this->Map[0]) << " x " << size(this->Map) << std::endl;
-				std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
-				if (!Out.bad()) {
-					for (const auto& r : this->Map) {
-						for (const auto& c : r) {
-							assert(this->Patterns[c.PatternIndex].HasValidPaletteIndex());
-							//!< アプリから使用できるパターンインデックスは 256 以降 [256, 4095] なのでオフセット
-							const uint16_t BAT = (this->Patterns[c.PatternIndex].PaletteIndex << 12) | (c.PatternIndex + 256); 
-							Out.write(reinterpret_cast<const char*>(&BAT), sizeof(BAT));
-						}
+
+				std::ofstream OutBin(data(std::string(Name) + ".bin"), std::ios::binary | std::ios::out);
+				assert(!OutBin.bad());
+				std::ofstream OutText(data(std::string(Name) + ".txt"), std::ios::out);
+				assert(!OutText.bad());
+				
+				//OutText << "const " << typeid(uint16_t).name() << " " << Name << "[] = {" << std::endl;
+				OutText << "const u" << (sizeof(uint16_t) << 3) << " " << Name << "[] = {" << std::endl;
+
+				for (auto i = 0; i < size(this->Map); ++i) {
+					OutText << "\t";
+					for (auto j = 0; j < size(this->Map[i]); ++j) {
+						const auto PatIdx = this->Map[i][j].PatternIndex;
+						assert(this->Patterns[PatIdx].HasValidPaletteIndex());
+
+						//!< アプリから使用できるパターンインデックスは 256 以降 [256, 4095] なのでオフセット
+						const uint16_t BAT = (this->Patterns[PatIdx].PaletteIndex << 12) | (PatIdx + 256);
+						OutBin.write(reinterpret_cast<const char*>(&BAT), sizeof(BAT));
+
+						OutText << "0x" << std::hex << std::setw(sizeof(BAT) << 1) << std::right << std::setfill('0') << BAT;
+						if (size(this->Map) - 1 > i || size(this->Map[i]) - 1 > j) { OutText << ", "; }
 					}
-					Out.close();
+					OutText << std::endl;
 				}
+				OutText << "};" << std::endl;
+
+				OutBin.close();
+				OutText.close();
+				
 				return *this;
 			}
 		};
@@ -651,7 +668,7 @@ namespace PCE
 								Plane |= ((ColorIndex & MaskL) ? 1 : 0) << ShiftL;
 								Plane |= ((ColorIndex & MaskU) ? 1 : 0) << ShiftU;
 							}
-							OutText << "0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane << ", ";
+							OutText << "0x" << std::hex << std::setw(sizeof(Plane) << 1) << std::right << std::setfill('0') << Plane << ", ";
 
 							OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
 						}
@@ -672,7 +689,7 @@ namespace PCE
 								Plane |= ((ColorIndex & MaskL) ? 1 : 0) << ShiftL;
 								Plane |= ((ColorIndex & MaskU) ? 1 : 0) << ShiftU;
 							}
-							OutText << "0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane << ", ";
+							OutText << "0x" << std::hex << std::setw(sizeof(Plane) << 1) << std::right << std::setfill('0') << Plane << ", ";
 
 							OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
 						}
@@ -693,7 +710,7 @@ namespace PCE
 								Plane |= ((ColorIndex & MaskL) ? 1 : 0) << ShiftL;
 								Plane |= ((ColorIndex & MaskU) ? 1 : 0) << ShiftU;
 							}
-							OutText << "0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane << ", ";
+							OutText << "0x" << std::hex << std::setw(sizeof(Plane) << 1) << std::right << std::setfill('0') << Plane << ", ";
 
 							OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
 						}
@@ -714,7 +731,7 @@ namespace PCE
 								Plane |= ((ColorIndex & MaskL) ? 1 : 0) << ShiftL;
 								Plane |= ((ColorIndex & MaskU) ? 1 : 0) << ShiftU;
 							}
-							OutText << "0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane;
+							OutText << "0x" << std::hex << std::setw(sizeof(Plane) << 1) << std::right << std::setfill('0') << Plane;
 							if (size(this->Patterns) - 1 > pat || 1 > pl || h - 1 > i) { OutText << ", "; }
 
 							OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
@@ -729,31 +746,63 @@ namespace PCE
 
 				return *this;
 			}
-			virtual const Converter& OutputPatternPalette(std::string_view Path) const {
-				std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
-				if (!Out.bad()) {
-					for (auto p : this->Patterns) {
-						//!< パターン毎のパレットインデックス (4 ビットシフトする必要がある)
-						assert(p.HasValidPaletteIndex());
-						const uint8_t PalIdx = p.PaletteIndex << 4;
-						Out.write(reinterpret_cast<const char*>(&PalIdx), sizeof(PalIdx));
-					}
-					Out.close();
+			virtual const Converter& OutputPatternPalette(std::string_view Name) const {
+				std::ofstream OutBin(data(std::string(Name) + ".bin"), std::ios::binary | std::ios::out);
+				assert(!OutBin.bad());
+				std::ofstream OutText(data(std::string(Name) + ".txt"), std::ios::out);
+				assert(!OutText.bad());
+
+				//OutText << "const " << typeid(uint8_t).name() << " " << Name << "[] = {" << std::endl;
+				OutText << "const u" << (sizeof(uint8_t) << 3) << " " << Name << "[] = {" << std::endl;
+
+				for (auto i = 0; i < size(this->Patterns); ++i) {
+					const auto& Pat = this->Patterns[i];
+
+					//!< パターン毎のパレットインデックス (4 ビットシフトする必要がある)
+					assert(Pat.HasValidPaletteIndex());
+					const uint8_t PalIdx = Pat.PaletteIndex << 4;
+
+					OutText << "\t0x" << std::hex << std::setw(sizeof(PalIdx) << 1) << std::right << std::setfill('0') << static_cast<uint16_t>(PalIdx);
+					if (size(this->Patterns) - 1 > i) { OutText << ", "; }
+					OutText << std::endl;
+
+					OutBin.write(reinterpret_cast<const char*>(&PalIdx), sizeof(PalIdx));
 				}
+				OutText << "};" << std::endl;
+
+				OutBin.close();
+				OutText.close();
+
 				return *this;
 			}
-			virtual const Converter& OutputMap(std::string_view Path) const {
+			virtual const Converter& OutputMap(std::string_view Name) const {
 				std::cout << "\tMap size = " << size(this->Map[0]) << " x " << size(this->Map) << std::endl;
-				std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
-				if (!Out.bad()) {
-					for (const auto& r : this->Map) {
-						for (const auto& c : r) {
-							const auto PatIdx8 = static_cast<uint8_t>(c.PatternIndex);
-							Out.write(reinterpret_cast<const char*>(&PatIdx8), sizeof(PatIdx8));
-						}
+
+				std::ofstream OutBin(data(std::string(Name) + ".bin"), std::ios::binary | std::ios::out);
+				assert(!OutBin.bad());
+				std::ofstream OutText(data(std::string(Name) + ".txt"), std::ios::out);
+				assert(!OutText.bad());
+
+				//OutText << "const " << typeid(uint8_t).name() << " " << Name << "[] = {" << std::endl;
+				OutText << "const u" << (sizeof(uint8_t) << 3) << " " << Name << "[] = {" << std::endl;
+
+				for (auto i = 0; i < size(this->Map); ++i) {
+					OutText << "\t";
+					for (auto j = 0; j < size(this->Map[i]); ++j) {
+						const auto PatIdx8 = static_cast<uint8_t>(this->Map[i][j].PatternIndex);
+
+						OutText << "0x" << std::hex << std::setw(sizeof(PatIdx8) << 1) << std::right << std::setfill('0') << static_cast<uint16_t>(PatIdx8);
+						if (size(this->Map) - 1 > i || size(this->Map[i]) - 1 > j) { OutText << ", "; }
+
+						OutBin.write(reinterpret_cast<const char*>(&PatIdx8), sizeof(PatIdx8));
 					}
-					Out.close();
+					OutText << std::endl;
 				}
+				OutText << "};" << std::endl;
+
+				OutBin.close();
+				OutText.close();
+
 				return *this;
 			}
 		};
@@ -803,11 +852,10 @@ namespace PCE
 								const auto Mask = 1 << pl;
 								Plane |= ((ColorIndex & Mask) ? 1 : 0) << Shift;
 							}
-							OutText << "0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane;
+							OutText << "0x" << std::hex << std::setw(sizeof(Plane) << 1) << std::right << std::setfill('0') << Plane;
 							if (size(this->Patterns) - 1 > pat || 3 > pl || size(Pat.ColorIndices) - 1 > i) { OutText << ", "; }
 
 							OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
-							//std::cout << "\t0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane << "," << std::endl;
 						}
 					}
 					OutText << std::endl;
@@ -1056,7 +1104,6 @@ namespace FC {
 									Plane |= ((ColorIndex & Mask) ? 1 : 0) << Shift;
 								}
 								Out.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
-								//std::cout << "\t0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane << "," << std::endl;
 							}
 						}
 					}
@@ -1113,7 +1160,7 @@ static void ProcessTileSet(std::string_view Name, std::string_view File, [[maybe
 #else
 		PCE::BG::Converter<>(Image).Create().OutputPattern(Name).RestorePattern();
 		std::cout << "[ Output PatternPalette ] " << Name << ".pal" << " (" << File << ")" << std::endl;
-		PCE::BG::Converter<>(Image).Create().OutputPatternPalette(std::string(Name) + ".pal.bin");
+		PCE::BG::Converter<>(Image).Create().OutputPatternPalette(std::string(Name) + ".pal");
 #endif
 #pragma endregion
 	}
@@ -1126,10 +1173,10 @@ static void ProcessMap(std::string_view Name, std::string_view File, std::string
 #pragma region PCE
 #if 0
 		std::cout << "[ Output BAT ] " << Name << " (" << File << ")" << std::endl;
-		PCE::Image::Converter<>(Image).Create().OutputBAT(std::string(Name) + ".bin").RestoreMap();
+		PCE::Image::Converter<>(Image).Create().OutputBAT(Name).RestoreMap();
 #else
 		std::cout << "[ Output Map ] " << Name << " (" << File << ")" << std::endl;
-		PCE::BG::Converter<>(Image).Create().OutputMap(std::string(Name) + ".bin").RestoreMap();
+		PCE::BG::Converter<>(Image).Create().OutputMap(Name).RestoreMap();
 #endif
 #pragma endregion
 	}
