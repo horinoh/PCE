@@ -372,7 +372,7 @@ public:
 			OutText << "\t";
 			for (auto j = 0; j < size(PalOut); ++j) {
 				OutText << "0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << PalOut[j];
-				if (size(PalOut) - 1 != j) { OutText << ", "; }
+				if (size(PalOut) - 1 > j) { OutText << ", "; }
 			}
 			OutText << std::endl;
 
@@ -535,13 +535,18 @@ namespace PCE
 				std::ofstream OutText(data(std::string(Name) + ".txt"), std::ios::out);
 				assert(!OutText.bad());
 
-				for (auto p : this->Patterns) {
+				//OutText << "const " << typeid(uint16_t).name() << " " << Name << "[] = {" << std::endl;
+				OutText << "const u" << (sizeof(uint16_t) << 3) << " " << Name << "[] = {" << std::endl;
+
+				for(auto pat=0;pat<size(this->Patterns);++pat) {
+					const auto& Pat = this->Patterns[pat];
 					//!< 2 プレーン
 					for (auto pl = 0; pl < 2; ++pl) {
-						for (const auto& i : p.ColorIndices) {
+						OutText << "\t";
+						for (auto i = 0; i < size(Pat.ColorIndices); ++i) {
 							uint16_t Plane = 0;
-							for (auto j = 0; j < size(i); ++j) {
-								const auto ColorIndex = i[j] + 1; //!< 先頭の透明色を考慮して + 1
+							for (auto j = 0; j < size(Pat.ColorIndices[i]); ++j) {
+								const auto ColorIndex = Pat.ColorIndices[i][j] + 1; //!< 先頭の透明色を考慮して + 1
 								const auto ShiftL = 7 - j;
 								const auto ShiftU = ShiftL + 8;
 								const auto MaskL = 1 << ((pl << 1) + 0);
@@ -549,12 +554,19 @@ namespace PCE
 								Plane |= ((ColorIndex & MaskL) ? 1 : 0) << ShiftL;
 								Plane |= ((ColorIndex & MaskU) ? 1 : 0) << ShiftU;
 							}
+							OutText << "0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane;
+							if (size(this->Patterns) - 1 > pat || 1 > pl || size(Pat.ColorIndices) - 1 > i) { OutText << ", "; }
+
 							OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
 						}
 					}
-					OutBin.close();
-					OutText.close();
+					OutText << std::endl;
 				}
+				OutText << "};" << std::endl;
+
+				OutBin.close();
+				OutText.close();
+				
 				return *this;
 			}
 			//!< BAT はパターン番号とパレット番号からなるマップ
@@ -605,87 +617,116 @@ namespace PCE
 
 			virtual Converter& Create() override { Super::Create(); return *this; }
 
-			virtual const Converter& OutputPattern(std::string_view Path) const override {
+			virtual const Converter& OutputPattern(std::string_view Name) const override {
 				std::cout << "\tPattern count = " << size(this->Patterns) << std::endl;
-				std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
-				if (!Out.bad()) {
-					//!< 16 x 16 のパターンを 4 つの 8 x 8 部分 (LT, RT, LB, RB) に分けて出力する
-					for (auto p : this->Patterns) {
-						const auto h = size(p.ColorIndices) >> 1;
-						const auto w = size(p.ColorIndices[0]) >> 1;
 
-						//!< LT (左上 8 x 8)
-						//!< 2 プレーン
-						for (auto pl = 0; pl < 2; ++pl) {
-							//!< 8 x 8 部分
-							for (auto i = 0; i < h; ++i) {
-								uint16_t Plane = 0;
-								for (auto j = 0; j < w; ++j) {
-									const auto ColorIndex = p.ColorIndices[i][j] + 1; //!< 先頭の透明色を考慮して + 1
-									const auto ShiftL = 7 - j;
-									const auto ShiftU = ShiftL + 8;
-									const auto MaskL = 1 << ((pl << 1) + 0);
-									const auto MaskU = 1 << ((pl << 1) + 1);
-									Plane |= ((ColorIndex & MaskL) ? 1 : 0) << ShiftL;
-									Plane |= ((ColorIndex & MaskU) ? 1 : 0) << ShiftU;
-								}
-								Out.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
-							}
-						}
+				std::ofstream OutBin(data(std::string(Name) + ".bin"), std::ios::binary | std::ios::out);
+				assert(!OutBin.bad());
+				std::ofstream OutText(data(std::string(Name) + ".txt"), std::ios::out);
+				assert(!OutText.bad());
 
-						//!< RT (右上 8 x 8)
-						for (auto pl = 0; pl < 2; ++pl) {
-							for (auto i = 0; i < h; ++i) {
-								uint16_t Plane = 0;
-								for (auto j = 0; j < w; ++j) {
-									const auto ColorIndex = p.ColorIndices[i][j + w] + 1;
-									const auto ShiftL = 7 - j;
-									const auto ShiftU = ShiftL + 8;
-									const auto MaskL = 1 << ((pl << 1) + 0);
-									const auto MaskU = 1 << ((pl << 1) + 1);
-									Plane |= ((ColorIndex & MaskL) ? 1 : 0) << ShiftL;
-									Plane |= ((ColorIndex & MaskU) ? 1 : 0) << ShiftU;
-								}
-								Out.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
-							}
-						}
+				//OutText << "const " << typeid(uint16_t).name() << " " << Name << "[] = {" << std::endl;
+				OutText << "const u" << (sizeof(uint16_t) << 3) << " " << Name << "[] = {" << std::endl;
 
-						//!< LB (左下 8 x 8)
-						for (auto pl = 0; pl < 2; ++pl) {
-							for (auto i = 0; i < h; ++i) {
-								uint16_t Plane = 0;
-								for (auto j = 0; j < w; ++j) {
-									const auto ColorIndex = p.ColorIndices[i + h][j] + 1;
-									const auto ShiftL = 7 - j;
-									const auto ShiftU = ShiftL + 8;
-									const auto MaskL = 1 << ((pl << 1) + 0);
-									const auto MaskU = 1 << ((pl << 1) + 1);
-									Plane |= ((ColorIndex & MaskL) ? 1 : 0) << ShiftL;
-									Plane |= ((ColorIndex & MaskU) ? 1 : 0) << ShiftU;
-								}
-								Out.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
-							}
-						}
+				//!< 16 x 16 のパターンを 4 つの 8 x 8 部分 (LT, RT, LB, RB) に分けて出力する
+				for (auto pat = 0; pat < size(this->Patterns);++pat) {
+					const auto& Pat = this->Patterns[pat];
 
-						//!< RB (右下 8 x 8)
-						for (auto pl = 0; pl < 2; ++pl) {
-							for (auto i = 0; i < h; ++i) {
-								uint16_t Plane = 0;
-								for (auto j = 0; j < w; ++j) {
-									const auto ColorIndex = p.ColorIndices[i + h][j + w] + 1;
-									const auto ShiftL = 7 - j;
-									const auto ShiftU = ShiftL + 8;
-									const auto MaskL = 1 << ((pl << 1) + 0);
-									const auto MaskU = 1 << ((pl << 1) + 1);
-									Plane |= ((ColorIndex & MaskL) ? 1 : 0) << ShiftL;
-									Plane |= ((ColorIndex & MaskU) ? 1 : 0) << ShiftU;
-								}
-								Out.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
+					const auto h = size(Pat.ColorIndices) >> 1;
+					const auto w = size(Pat.ColorIndices[0]) >> 1;
+
+					//!< LT (左上 8 x 8)
+					//!< 2 プレーン
+					for (auto pl = 0; pl < 2; ++pl) {
+						OutText << "\t";
+						//!< 8 x 8 部分
+						for (auto i = 0; i < h; ++i) {
+							uint16_t Plane = 0;
+							for (auto j = 0; j < w; ++j) {
+								const auto ColorIndex = Pat.ColorIndices[i][j] + 1; //!< 先頭の透明色を考慮して + 1
+								const auto ShiftL = 7 - j;
+								const auto ShiftU = ShiftL + 8;
+								const auto MaskL = 1 << ((pl << 1) + 0);
+								const auto MaskU = 1 << ((pl << 1) + 1);
+								Plane |= ((ColorIndex & MaskL) ? 1 : 0) << ShiftL;
+								Plane |= ((ColorIndex & MaskU) ? 1 : 0) << ShiftU;
 							}
+							OutText << "0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane << ", ";
+
+							OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
 						}
 					}
-					Out.close();
+					OutText << std::endl;
+
+					//!< RT (右上 8 x 8)
+					for (auto pl = 0; pl < 2; ++pl) {
+						OutText << "\t";
+						for (auto i = 0; i < h; ++i) {
+							uint16_t Plane = 0;
+							for (auto j = 0; j < w; ++j) {
+								const auto ColorIndex = Pat.ColorIndices[i][j + w] + 1;
+								const auto ShiftL = 7 - j;
+								const auto ShiftU = ShiftL + 8;
+								const auto MaskL = 1 << ((pl << 1) + 0);
+								const auto MaskU = 1 << ((pl << 1) + 1);
+								Plane |= ((ColorIndex & MaskL) ? 1 : 0) << ShiftL;
+								Plane |= ((ColorIndex & MaskU) ? 1 : 0) << ShiftU;
+							}
+							OutText << "0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane << ", ";
+
+							OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
+						}
+					}
+					OutText << std::endl;
+
+					//!< LB (左下 8 x 8)
+					for (auto pl = 0; pl < 2; ++pl) {
+						OutText << "\t";
+						for (auto i = 0; i < h; ++i) {
+							uint16_t Plane = 0;
+							for (auto j = 0; j < w; ++j) {
+								const auto ColorIndex = Pat.ColorIndices[i + h][j] + 1;
+								const auto ShiftL = 7 - j;
+								const auto ShiftU = ShiftL + 8;
+								const auto MaskL = 1 << ((pl << 1) + 0);
+								const auto MaskU = 1 << ((pl << 1) + 1);
+								Plane |= ((ColorIndex & MaskL) ? 1 : 0) << ShiftL;
+								Plane |= ((ColorIndex & MaskU) ? 1 : 0) << ShiftU;
+							}
+							OutText << "0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane << ", ";
+
+							OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
+						}
+					}
+					OutText << std::endl;
+
+					//!< RB (右下 8 x 8)
+					for (auto pl = 0; pl < 2; ++pl) {
+						OutText << "\t";
+						for (auto i = 0; i < h; ++i) {
+							uint16_t Plane = 0;
+							for (auto j = 0; j < w; ++j) {
+								const auto ColorIndex = Pat.ColorIndices[i + h][j + w] + 1;
+								const auto ShiftL = 7 - j;
+								const auto ShiftU = ShiftL + 8;
+								const auto MaskL = 1 << ((pl << 1) + 0);
+								const auto MaskU = 1 << ((pl << 1) + 1);
+								Plane |= ((ColorIndex & MaskL) ? 1 : 0) << ShiftL;
+								Plane |= ((ColorIndex & MaskU) ? 1 : 0) << ShiftU;
+							}
+							OutText << "0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane;
+							if (size(this->Patterns) - 1 > pat || 1 > pl || h - 1 > i) { OutText << ", "; }
+
+							OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
+						}
+					}
+					OutText << std::endl;
 				}
+				OutText << "};" << std::endl;
+
+				OutBin.close();
+				OutText.close();
+
 				return *this;
 			}
 			virtual const Converter& OutputPatternPalette(std::string_view Path) const {
@@ -732,33 +773,50 @@ namespace PCE
 			virtual Converter& Create() override { Super::Create(); return *this; }
 
 			//virtual Converter& CreatePalette() { this->CreatePalettePerMapRow(); return *this; }
-			virtual const Converter& OutputPattern(std::string_view Path) const override {
+
+			virtual const Converter& OutputPattern(std::string_view Name) const override {
 				std::cout << "\tPattern count = " << size(this->Patterns) << std::endl;
 				std::cout << "\tSprite size = " << static_cast<uint16_t>(W) << " x " << static_cast<uint16_t>(H) << std::endl;
-				std::ofstream Out(data(Path), std::ios::binary | std::ios::out);
-				if (!Out.bad()) {
-					for (auto p : this->Patterns) {
-						//!< パターン毎のパレットインデックス情報を出力
-						assert(p.HasValidPaletteIndex());
-						std::cout << "\t\tPalette index = " << p.PaletteIndex << std::endl;
 
-						//!< 4 プレーン
-						for (auto pl = 0; pl < 4; ++pl) {
-							for (const auto& i : p.ColorIndices) {
-								uint16_t Plane = 0;
-								for (auto j = 0; j < size(i); ++j) {
-									const auto ColorIndex = i[j] + 1; //!< 先頭の透明色を考慮して + 1
-									const auto Shift = 15 - j;
-									const auto Mask = 1 << pl;
-									Plane |= ((ColorIndex & Mask) ? 1 : 0) << Shift;
-								}
-								Out.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
-								//std::cout << "\t0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane << "," << std::endl;
+				std::ofstream OutBin(data(std::string(Name) + ".bin"), std::ios::binary | std::ios::out);
+				assert(!OutBin.bad());
+				std::ofstream OutText(data(std::string(Name) + ".txt"), std::ios::out);
+				assert(!OutText.bad());
+
+				//OutText << "const " << typeid(uint16_t).name() << " " << Name << "[] = {" << std::endl;
+				OutText << "const u" << (sizeof(uint16_t) << 3) << " " << Name << "[] = {" << std::endl;
+
+				for (auto pat = 0; pat < size(this->Patterns); ++pat) {
+					const auto& Pat = this->Patterns[pat];
+					//!< パターン毎のパレットインデックス情報を出力
+					assert(Pat.HasValidPaletteIndex());
+					std::cout << "\t\tPalette index = " << Pat.PaletteIndex << std::endl;
+
+					//!< 4 プレーン
+					for (auto pl = 0; pl < 4; ++pl) {
+						OutText << "\t";
+						for (auto i = 0; i < size(Pat.ColorIndices); ++i) {
+							uint16_t Plane = 0;
+							for (auto j = 0; j < size(Pat.ColorIndices[i]); ++j) {
+								const auto ColorIndex = Pat.ColorIndices[i][j] + 1; //!< 先頭の透明色を考慮して + 1
+								const auto Shift = 15 - j;
+								const auto Mask = 1 << pl;
+								Plane |= ((ColorIndex & Mask) ? 1 : 0) << Shift;
 							}
+							OutText << "0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane;
+							if (size(this->Patterns) - 1 > pat || 3 > pl || size(Pat.ColorIndices) - 1 > i) { OutText << ", "; }
+
+							OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
+							//std::cout << "\t0x" << std::hex << std::setw(4) << std::right << std::setfill('0') << Plane << "," << std::endl;
 						}
 					}
-					Out.close();
+					OutText << std::endl;
 				}
+				OutText << "};" << std::endl;
+
+				OutBin.close();
+				OutText.close();
+				
 				return *this;
 			}
 		};
@@ -1051,7 +1109,7 @@ static void ProcessTileSet(std::string_view Name, std::string_view File, [[maybe
 #pragma region PCE
 #if 0
 		//!< イメージの場合はパターンが全部異なったりするので、マップ(BAT) を復元するのと大して変わらない
-		PCE::Image::Converter<>(Image).Create().OutputPattern(std::string(Name) + ".bin");
+		PCE::Image::Converter<>(Image).Create().OutputPattern(Name);
 #else
 		PCE::BG::Converter<>(Image).Create().OutputPattern(Name).RestorePattern();
 		std::cout << "[ Output PatternPalette ] " << Name << ".pal" << " (" << File << ")" << std::endl;
