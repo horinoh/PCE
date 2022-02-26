@@ -870,6 +870,81 @@ namespace PCE
 				}
 		};
 	}
+
+	static void ProcessPalette(std::string_view Name, std::string_view File) {
+		if (!empty(File)) {
+			auto Image = cv::imread(data(File));
+			std::cout << "[ Output Palette ] " << Name << " (" << File << ")" << std::endl;
+#if 0
+			Image::Converter<>(Image).Create().OutputPalette(Name).RestorePalette();
+#else
+			BG::Converter<>(Image).Create().OutputPalette(Name).RestorePalette();
+#endif
+		}
+	}
+	static void ProcessTileSet(std::string_view Name, std::string_view File, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] std::string_view Option) {
+		if (!empty(File)) {
+			auto Image = cv::imread(data(File));
+			std::cout << "[ Output Pattern ] " << Name << " (" << File << ")" << std::endl;
+
+#if 0
+			//!< イメージの場合はパターンが全部異なったりするので、マップ(BAT) を復元するのと大して変わらない
+			Image::Converter<>(Image).Create().OutputPattern(Name);
+#else
+			BG::Converter<>(Image).Create().OutputPattern(Name).OutputPatternPalette(Name).RestorePattern();
+#endif
+		}
+	}
+	static void ProcessMap(std::string_view Name, std::string_view File, std::string_view TileSet, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] const uint32_t Mapbase) {
+		if (!empty(File)) {
+			auto Image = cv::imread(data(File));
+
+#if 0
+			std::cout << "[ Output BAT ] " << Name << " (" << File << ")" << std::endl;
+			Image::Converter<>(Image).Create().OutputBAT(Name).RestoreMap();
+#else
+			std::cout << "[ Output Map ] " << Name << " (" << File << ")" << std::endl;
+			BG::Converter<>(Image).Create().OutputMap(Name).RestoreMap();
+#endif
+		}
+	}
+	static void ProcessSprite(std::string_view Name, std::string_view File, const uint32_t Width, const uint32_t Height, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] const uint32_t Time, [[maybe_unused]] std::string_view Collision, [[maybe_unused]] std::string_view Option, [[maybe_unused]] const uint32_t Iteration) {
+		if (!empty(File)) {
+			auto Image = cv::imread(data(File));
+			std::cout << "[ Output Sprite ] " << Name << " (" << File << ")" << std::endl;
+			switch (Width << 3) {
+			case 16:
+				switch (Height << 3) {
+				case 16:
+					Sprite::Converter<16, 16>(Image).Create().OutputPattern(Name).OutputAnimation(Name).RestorePattern();
+					break;
+				case 32:
+					Sprite::Converter<16, 32>(Image).Create().OutputPattern(Name).OutputAnimation(Name).RestorePattern();
+					break;
+				case 64:
+					Sprite::Converter<16, 64>(Image).Create().OutputPattern(Name).OutputAnimation(Name).RestorePattern();
+					break;
+				default: break;
+				}
+				break;
+			case 32:
+				switch (Height << 3) {
+				case 16:
+					Sprite::Converter<32, 16>(Image).Create().OutputPattern(Name).OutputAnimation(Name).RestorePattern();
+					break;
+				case 32:
+					Sprite::Converter<32, 32>(Image).Create().OutputPattern(Name).OutputAnimation(Name).RestorePattern();
+					break;
+				case 64:
+					Sprite::Converter<32, 64>(Image).Create().OutputPattern(Name).OutputAnimation(Name).RestorePattern();
+					break;
+				default: break;
+				}
+				break;
+			default: break;
+			}
+		}
+	}
 }
 #pragma endregion //!< PCE
 
@@ -989,6 +1064,12 @@ namespace FC {
 
 		virtual uint16_t GetPaletteCount() const override { return 4; };
 		virtual uint16_t GetPaletteColorCount() const override { return 4; }
+
+		virtual ConverterBase& CreatePattern() override { 
+			Super::CreatePattern();
+			assert(size(this->Patterns) <= 256);
+			return *this;
+		}
 	};
 
 	namespace BG
@@ -1084,8 +1165,9 @@ namespace FC {
 			Converter(const cv::Mat& Img) : Super(Img) {}
 
 			virtual Converter& Create() override { Super::Create(); return *this; }
+
 			virtual const Converter& OutputPattern(std::string_view Name) const override {
-				std::cout << "\tPattern count = " << size(this->_Patterns) << std::endl;
+				std::cout << "\tPattern count = " << size(this->Patterns) << std::endl;
 				std::cout << "\tSprite size = " << static_cast<uint16_t>(W) << " x " << static_cast<uint16_t>(H) << std::endl;
 
 				std::ofstream OutBin(data(std::string(Name) + ".bin"), std::ios::binary | std::ios::out);
@@ -1109,7 +1191,7 @@ namespace FC {
 						for (auto i = 0; i < size(Pat.ColorIndices); ++i) {
 							uint8_t Plane = 0;
 							for (auto j = 0; j < size(Pat.ColorIndices[i]); ++j) {
-								const auto ColorIndex = Pat.ColorIndices[j] + 1; //!< 先頭の透明色を考慮して + 1
+								const auto ColorIndex = Pat.ColorIndices[i][j] + 1; //!< 先頭の透明色を考慮して + 1
 								const auto Shift = 7 - j;
 								const auto Mask = 1 << pl;
 								Plane |= ((ColorIndex & Mask) ? 1 : 0) << Shift;
@@ -1131,6 +1213,38 @@ namespace FC {
 			}
 		};
 	}
+
+	static void ProcessPalette(std::string_view Name, std::string_view File) {
+		if (!empty(File)) {
+			auto Image = cv::imread(data(File));
+			std::cout << "[ Output Palette ] " << Name << " (" << File << ")" << std::endl;
+
+			BG::Converter<>(Image).Create().OutputPalette(Name).RestorePalette();
+		}
+	}
+	static void ProcessTileSet(std::string_view Name, std::string_view File, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] std::string_view Option) {
+		if (!empty(File)) {
+			auto Image = cv::imread(data(File));
+			std::cout << "[ Output Pattern ] " << Name << " (" << File << ")" << std::endl;
+
+			BG::Converter<>(Image).Create().OutputPattern(Name).RestorePattern();
+		}
+	}
+	static void ProcessMap(std::string_view Name, std::string_view File, std::string_view TileSet, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] const uint32_t Mapbase) {
+		if (!empty(File)) {
+			auto Image = cv::imread(data(File));
+
+			std::cout << "[ Output BAT ] " << Name << " (" << File << ")" << std::endl;
+			BG::Converter<>(Image).Create().OutputBAT(Name).RestoreMap();
+		}
+	}
+	static void ProcessSprite(std::string_view Name, std::string_view File, const uint32_t Width, const uint32_t Height, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] const uint32_t Time, [[maybe_unused]] std::string_view Collision, [[maybe_unused]] std::string_view Option, [[maybe_unused]] const uint32_t Iteration) {
+		if (!empty(File)) {
+			auto Image = cv::imread(data(File));
+			std::cout << "[ Output Sprite ] " << Name << " (" << File << ")" << std::endl;
+			Sprite::Converter<8, 8>(Image).Create().OutputPattern(Name).OutputAnimation(Name).RestorePattern();
+		}
+	}
 }
 #pragma endregion //!< FC
 
@@ -1142,103 +1256,194 @@ namespace FC {
 */
 namespace GB
 {
+#define TO_BGR(r, g, b) cv::Vec3b(b, g, r)
+	static const std::array ColorEntries = {
+		TO_BGR(15, 56, 15),
+		TO_BGR(48, 98, 48),
+		TO_BGR(139, 172, 15),
+		TO_BGR(155, 188, 15),
+	};
+#undef TO_BGR
+	template<uint8_t W, uint8_t H>
+	class ConverterBase : public Converter<W, H>
+	{
+	private:
+		using Super = Converter<W, H>;
+	public:
+		ConverterBase(const cv::Mat& Img) : Super(Img) {}
+
+		virtual uint16_t ToPlatformColor(const cv::Vec3b& Color) const override {
+			uint8_t Index = 0xff;
+			float minDistSq = std::numeric_limits<float>::max();
+			for (auto i = 0; i < size(ColorEntries); ++i) {
+				const auto d = cv::Vec3f(ColorEntries[i]) - cv::Vec3f(Color);
+				const auto distSq = d.dot(d);
+				if (distSq < minDistSq) {
+					minDistSq = distSq;
+					Index = i;
+				}
+			}
+			return Index;
+		}
+		virtual cv::Vec3b FromPlatformColor(const uint16_t& Index) const override {
+			if (Index < size(ColorEntries)) {
+				return ColorEntries[Index];
+			}
+			return cv::Vec3b(0, 0, 0);
+		}
+
+		virtual uint16_t GetPaletteCount() const override { return 1; };
+		virtual uint16_t GetPaletteColorCount() const override { return 4; }
+
+		virtual ConverterBase& CreatePattern() override {
+			Super::CreatePattern();
+
+			if (size(this->Patterns) > 128) {
+				//!< 共用分のパターン領域を使用する必要がある
+				std::cerr << "Pattern count = " << size(this->Patterns) << " > 128" << std::endl;
+			}
+			//!< 共用分のパターン領域を使用しても足りない
+			assert(size(this->Patterns) <= 256);
+			return *this;
+		}
+	};
 	namespace BG 
 	{
+		template<uint8_t W = 8, uint8_t H = 8>
+		class Converter : public ConverterBase<W, H>
+		{
+		private:
+			using Super = ConverterBase<W, H>;
+		public:
+			Converter(const cv::Mat& Img) : Super(Img) {}
+
+			virtual Converter& Create() override { Super::Create(); return *this; }
+		};
 	}
 	namespace Sprite 
 	{
+		template<uint8_t W = 8, uint8_t H = 8>
+		class Converter : public ConverterBase<W, H>
+		{
+		private:
+			using Super = ConverterBase<W, H>;
+		public:
+			Converter(const cv::Mat& Img) : Super(Img) {}
+
+			virtual uint16_t GetPaletteCount() const override { return 2; };
+
+			virtual Converter& Create() override { Super::Create(); return *this; }
+
+			virtual const Converter& OutputPattern(std::string_view Name) const override {
+				std::cout << "\tPattern count = " << size(this->Patterns) << std::endl;
+				std::cout << "\tSprite size = " << static_cast<uint16_t>(W) << " x " << static_cast<uint16_t>(H) << std::endl;
+
+				std::ofstream OutBin(data(std::string(Name) + ".bin"), std::ios::binary | std::ios::out);
+				assert(!OutBin.bad());
+				std::ofstream OutText(data(std::string(Name) + ".txt"), std::ios::out);
+				assert(!OutText.bad());
+
+				//OutText << "const " << typeid(uint8_t).name() << " " << Name << "[] = {" << std::endl;
+				OutText << "const u" << (sizeof(uint8_t) << 3) << " " << Name << "[] = {" << std::endl;
+
+				for (auto pat = 0; pat < size(this->Patterns); ++pat) {
+					const auto& Pat = this->Patterns[pat];
+					assert(Pat.HasValidPaletteIndex());
+
+					//!< パターン毎のパレットインデックス情報を出力
+					std::cout << "\t\tPalette index = " << Pat.PaletteIndex << std::endl;
+
+					OutText << "\t";
+					for (auto i = 0; i < size(Pat.ColorIndices); ++i) {
+						//!< 2 プレーン (GB ではプレーンをまとめて出力ではなく、交互に出力)
+						for (auto pl = 0; pl < 2; ++pl) {
+							uint8_t Plane = 0;
+							for (auto j = 0; j < size(Pat.ColorIndices[i]); ++j) {
+								const auto ColorIndex = Pat.ColorIndices[i][j] + 1; //!< 先頭の透明色を考慮して + 1
+								const auto Shift = 7 - j;
+								const auto Mask = 1 << pl;
+								Plane |= ((ColorIndex & Mask) ? 1 : 0) << Shift;
+							}
+							OutText << "0x" << std::hex << std::setw(sizeof(Plane) << 1) << std::right << std::setfill('0') << Plane;
+							if (size(this->Patterns) - 1 > pat || 1 > pl || size(Pat.ColorIndices) - 1 > i) { OutText << ", "; }
+
+							OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
+						}
+					}
+					OutText << std::endl;
+				}
+				OutText << "};" << std::endl;
+
+				OutBin.close();
+				OutText.close();
+
+				return *this;
+			}
+		};
+	}
+
+	static void ProcessPalette(std::string_view Name, std::string_view File) {
+		if (!empty(File)) {
+			auto Image = cv::imread(data(File));
+			std::cout << "[ Output Palette ] " << Name << " (" << File << ")" << std::endl;
+
+			BG::Converter<>(Image).Create().OutputPalette(Name).RestorePalette();
+		}
+	}
+	static void ProcessTileSet(std::string_view Name, std::string_view File, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] std::string_view Option) {
+		if (!empty(File)) {
+			auto Image = cv::imread(data(File));
+			std::cout << "[ Output Pattern ] " << Name << " (" << File << ")" << std::endl;
+
+			BG::Converter<>(Image).Create().OutputPattern(Name).RestorePattern();
+		}
+	}
+	static void ProcessMap(std::string_view Name, std::string_view File, std::string_view TileSet, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] const uint32_t Mapbase) {
+		if (!empty(File)) {
+			auto Image = cv::imread(data(File));
+			std::cout << "[ Output Map ] " << Name << " (" << File << ")" << std::endl;
+
+			BG::Converter<>(Image).Create().OutputMap(Name).RestoreMap();
+		}
+	}
+	static void ProcessSprite(std::string_view Name, std::string_view File, const uint32_t Width, const uint32_t Height, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] const uint32_t Time, [[maybe_unused]] std::string_view Collision, [[maybe_unused]] std::string_view Option, [[maybe_unused]] const uint32_t Iteration) {
+		if (!empty(File)) {
+			auto Image = cv::imread(data(File));
+			std::cout << "[ Output Sprite ] " << Name << " (" << File << ")" << std::endl;
+
+			//!< 8x8 or 8x16
+			switch (Height << 3) {
+			case 8:
+				Sprite::Converter<8, 8>(Image).Create().OutputPattern(Name).OutputAnimation(Name).RestorePattern();
+				break;
+			case 16:
+				Sprite::Converter<8, 16>(Image).Create().OutputPattern(Name).OutputAnimation(Name).RestorePattern();
+				break;
+			}
+		}
 	}
 }
 #pragma endregion //!< GB
 
-static void ProcessPalette(std::string_view Name, std::string_view File)
-{
-	if (!empty(File)) {
-		auto Image = cv::imread(data(File));
-		std::cout << "[ Output Palette ] " << Name << " (" << File << ")" << std::endl;
-
-#pragma region PCE
-#if 0
-		PCE::Image::Converter<>(Image).Create().OutputPalette(Name).RestorePalette();
-#else
-		PCE::BG::Converter<>(Image).Create().OutputPalette(Name).RestorePalette();
-#endif
-#pragma endregion
-	}
+static void ProcessPalette(std::string_view Name, std::string_view File) {
+	PCE::ProcessPalette(Name, File);
+	//FC::ProcessPalette(Name, File);
+	//GB::ProcessPalette(Name, File);
 }
-static void ProcessTileSet(std::string_view Name, std::string_view File, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] std::string_view Option)
-{
-	if (!empty(File)) {
-		auto Image = cv::imread(data(File));
-		std::cout << "[ Output Pattern ] " << Name << " (" << File << ")" << std::endl;
-#pragma region PCE
-#if 0
-		//!< イメージの場合はパターンが全部異なったりするので、マップ(BAT) を復元するのと大して変わらない
-		PCE::Image::Converter<>(Image).Create().OutputPattern(Name);
-#else
-		PCE::BG::Converter<>(Image).Create().OutputPattern(Name).RestorePattern();
-		std::cout << "[ Output PatternPalette ] " << Name << ".pal" << " (" << File << ")" << std::endl;
-		PCE::BG::Converter<>(Image).Create().OutputPatternPalette(std::string(Name) + ".pal");
-#endif
-#pragma endregion
-	}
+static void ProcessTileSet(std::string_view Name, std::string_view File, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] std::string_view Option) {
+	PCE::ProcessTileSet(Name, File, Compression, Option);
+	//FC::ProcessTileSet(Name, File, Compression, Option);
+	//GB::ProcessTileSet(Name, File, Compression, Option);
 }
-static void ProcessMap(std::string_view Name, std::string_view File, std::string_view TileSet, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] const uint32_t Mapbase)
-{
-	if (!empty(File)) {
-		auto Image = cv::imread(data(File));
-
-#pragma region PCE
-#if 0
-		std::cout << "[ Output BAT ] " << Name << " (" << File << ")" << std::endl;
-		PCE::Image::Converter<>(Image).Create().OutputBAT(Name).RestoreMap();
-#else
-		std::cout << "[ Output Map ] " << Name << " (" << File << ")" << std::endl;
-		PCE::BG::Converter<>(Image).Create().OutputMap(Name).RestoreMap();
-#endif
-#pragma endregion
-	}
+static void ProcessMap(std::string_view Name, std::string_view File, std::string_view TileSet, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] const uint32_t Mapbase) {
+	PCE::ProcessMap(Name, File, TileSet, Compression, Mapbase);
+	//FC::ProcessMap(Name, File, TileSet, Compression, Mapbase);
+	//GB::ProcessMap(Name, File, TileSet, Compression, Mapbase);
 }
-static void ProcessSprite(std::string_view Name, std::string_view File, const uint32_t Width, const uint32_t Height, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] const uint32_t Time, [[maybe_unused]] std::string_view Collision, [[maybe_unused]] std::string_view Option, [[maybe_unused]] const uint32_t Iteration)
-{
-	if (!empty(File)) {
-		auto Image = cv::imread(data(File));
-
-		std::cout << "[ Output Sprite ] " << Name << " (" << File << ")" << std::endl;
-#pragma region PCE
-		switch (Width << 3) {
-		case 16:
-			switch (Height << 3) {
-			case 16: 
-				PCE::Sprite::Converter<16, 16>(Image).Create().OutputPattern(Name).OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
-				break;
-			case 32:
-				PCE::Sprite::Converter<16, 32>(Image).Create().OutputPattern(Name).OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
-				break;
-			case 64:
-				PCE::Sprite::Converter<16, 64>(Image).Create().OutputPattern(Name).OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
-				break;
-			default: break;
-			}
-			break;
-		case 32:
-			switch (Height << 3) {
-			case 16:
-				PCE::Sprite::Converter<32, 16>(Image).Create().OutputPattern(Name).OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
-				break;
-			case 32:
-				PCE::Sprite::Converter<32, 32>(Image).Create().OutputPattern(Name).OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
-				break;
-			case 64:
-				PCE::Sprite::Converter<32, 64>(Image).Create().OutputPattern(Name).OutputAnimation(std::string(Name) + ".anim.bin").RestorePattern();
-				break;
-			default: break;
-			}
-			break;
-		default: break;
-		}
-#pragma endregion
-	}
+static void ProcessSprite(std::string_view Name, std::string_view File, const uint32_t Width, const uint32_t Height, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] const uint32_t Time, [[maybe_unused]] std::string_view Collision, [[maybe_unused]] std::string_view Option, [[maybe_unused]] const uint32_t Iteration) {
+	PCE::ProcessSprite(Name, File, Width, Height, Compression, Time, Collision, Option, Iteration);
+	//FC::ProcessSprite(Name, File, Width, Height, Compression, Time, Collision, Option, Iteration);
+	//GB::ProcessSprite(Name, File, Width, Height, Compression, Time, Collision, Option, Iteration);
 }
 int main(int argc, char* argv[])
 {
