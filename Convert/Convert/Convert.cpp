@@ -370,7 +370,7 @@ public:
 			//!< 出力
 			OutText << "\t";
 			for (auto j = 0; j < size(PalOut); ++j) {
-				OutText << "0x" << std::hex << std::setw(sizeof(PalOut[j]) << 1) << std::right << std::setfill('0') << PalOut[j];
+				OutText << "0x" << std::hex << std::setw(sizeof(PalOut[j]) << 1) << std::right << std::setfill('0') << static_cast<uint16_t>(PalOut[j]);
 				if (size(PalOut) - 1 > j) { OutText << ", "; }
 			}
 			OutText << std::endl;
@@ -382,8 +382,8 @@ public:
 		OutBin.close();
 		OutText.close();
 	}
-	virtual const Converter& OutputPalette(std::string_view Path) const { return *this; }
-	virtual const Converter& OutputPattern(std::string_view Path) const { return *this; }
+	virtual const Converter& OutputPalette(std::string_view Name) const { return *this; }
+	virtual const Converter& OutputPattern(std::string_view Name) const { return *this; }
 	virtual const Converter& OutputMap(std::string_view Name) const {
 		std::cout << "\tMap size = " << size(this->Map[0]) << " x " << size(this->Map) << std::endl;
 
@@ -582,6 +582,16 @@ public:
 	virtual void ProcessTileSet(std::string_view Name, std::string_view File, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] std::string_view Option) {}
 	virtual void ProcessMap(std::string_view Name, std::string_view File, std::string_view TileSet, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] const uint32_t Mapbase) {}
 	virtual void ProcessSprite(std::string_view Name, std::string_view File, const uint32_t Width, const uint32_t Height, [[maybe_unused]] std::string_view Compression, [[maybe_unused]] const uint32_t Time, [[maybe_unused]] std::string_view Collision, [[maybe_unused]] std::string_view Option, [[maybe_unused]] const uint32_t Iteration) {}
+
+	virtual void Clear(std::string_view Name) {
+		std::filesystem::remove(std::string(Name) + ".bin");
+		std::filesystem::remove(std::string(Name) + ".text");
+	}
+	virtual void ClearPalette(std::string_view Name) { Clear(Name); }
+	virtual void ClearTileSet(std::string_view Name) { Clear(Name); }
+	virtual void ClearMap(std::string_view Name) { Clear(Name); }
+	virtual void ClearSprite(std::string_view Name) { Clear(Name); }
+
 };
 
 #pragma region PCE
@@ -606,8 +616,8 @@ namespace PCE
 		virtual uint16_t GetPaletteCount() const override { return 16; };
 		virtual uint16_t GetPaletteColorCount() const override { return 16; }
 
-		virtual const ConverterBase& OutputPalette(std::string_view Path) const override {
-			this->OutputPaletteOfType<uint16_t>(Path);
+		virtual const ConverterBase& OutputPalette(std::string_view Name) const override {
+			this->OutputPaletteOfType<uint16_t>(Name);
 			return *this;
 		}
 	};
@@ -649,7 +659,7 @@ namespace PCE
 				//OutText << "const " << typeid(uint16_t).name() << " " << Name << "[] = {" << std::endl;
 				OutText << "const u" << (sizeof(uint16_t) << 3) << " " << Name << "[] = {" << std::endl;
 
-				for(auto pat=0;pat<size(this->Patterns);++pat) {
+				for (auto pat = 0; pat < size(this->Patterns); ++pat) {
 					const auto& Pat = this->Patterns[pat];
 					//!< 2 プレーン
 					for (auto pl = 0; pl < 2; ++pl) {
@@ -757,7 +767,7 @@ namespace PCE
 				OutText << "const u" << (sizeof(uint16_t) << 3) << " " << Name << "[] = {" << std::endl;
 
 				//!< 16 x 16 のパターンを 4 つの 8 x 8 部分 (LT, RT, LB, RB) に分けて出力する
-				for (auto pat = 0; pat < size(this->Patterns);++pat) {
+				for (auto pat = 0; pat < size(this->Patterns); ++pat) {
 					const auto& Pat = this->Patterns[pat];
 
 					const auto h = size(Pat.ColorIndices) >> 1;
@@ -858,9 +868,9 @@ namespace PCE
 				return *this;
 			}
 			virtual const Converter& OutputPatternPalette(std::string_view Name) const {
-				std::ofstream OutBin(data(std::string(Name) + ".bin"), std::ios::binary | std::ios::out);
+				std::ofstream OutBin(data(std::string(Name) + ".pal" + ".bin"), std::ios::binary | std::ios::out);
 				assert(!OutBin.bad());
-				std::ofstream OutText(data(std::string(Name) + ".txt"), std::ios::out);
+				std::ofstream OutText(data(std::string(Name) + ".pal" + ".txt"), std::ios::out);
 				assert(!OutText.bad());
 
 				//OutText << "const " << typeid(uint8_t).name() << " " << Name << "[] = {" << std::endl;
@@ -953,6 +963,8 @@ namespace PCE
 
 	class ResourceReader : public ResourceReaderBase
 	{
+	private:
+		using Super = ResourceReaderBase;
 	public:
 		virtual void ProcessPalette(std::string_view Name, std::string_view File) override {
 			if (!empty(File)) {
@@ -1028,6 +1040,11 @@ namespace PCE
 				}
 			}
 		}
+		virtual void ClearTileSet(std::string_view Name) override { 
+			Super::ClearTileSet(Name); 
+			std::filesystem::remove(std::string(Name) + ".pal"  + ".bin");
+			std::filesystem::remove(std::string(Name) + ".pal"  + ".text");
+		}
 	};
 }
 #pragma endregion //!< PCE
@@ -1035,7 +1052,7 @@ namespace PCE
 #pragma region FC
 /*
 * 画面		: 256 x 240
-* BG		: 256 x 240 x 2 画面、パターン 8 x 8 x 256 種、(3 + 1) 色 x 4 パレット (52色中)
+* BG		: 256 x 240(32 x 30 セル) x 2 画面、パターン 8 x 8 x 256 種、(3 + 1) 色 x 4 パレット (52色中)
 * スプライト	: 8x8、64 枚、パターン 8 x 8 x 256 種、(3 + 1) 色 x 4 パレット (52色中) 
 */
 namespace FC {
@@ -1154,6 +1171,56 @@ namespace FC {
 			assert(size(this->Patterns) <= 256);
 			return *this;
 		}
+
+		virtual const ConverterBase& OutputPalette(std::string_view Name) const override {
+			this->OutputPaletteOfType<uint8_t>(Name);
+			return *this;
+		}
+		virtual const ConverterBase& OutputPattern(std::string_view Name) const override {
+			std::cout << "\tPattern count = " << size(this->Patterns) << std::endl;
+			std::cout << "\tSprite size = " << static_cast<uint16_t>(W) << " x " << static_cast<uint16_t>(H) << std::endl;
+
+			std::ofstream OutBin(data(std::string(Name) + ".bin"), std::ios::binary | std::ios::out);
+			assert(!OutBin.bad());
+			std::ofstream OutText(data(std::string(Name) + ".txt"), std::ios::out);
+			assert(!OutText.bad());
+
+			//OutText << "const " << typeid(uint8_t).name() << " " << Name << "[] = {" << std::endl;
+			OutText << "const u" << (sizeof(uint8_t) << 3) << " " << Name << "[] = {" << std::endl;
+
+			for (auto pat = 0; pat < size(this->Patterns); ++pat) {
+				const auto& Pat = this->Patterns[pat];
+				assert(Pat.HasValidPaletteIndex());
+
+				//!< パターン毎のパレットインデックス情報を出力
+				std::cout << "\t\tPalette index = " << Pat.PaletteIndex << std::endl;
+
+				//!< 2 プレーン
+				for (auto pl = 0; pl < 2; ++pl) {
+					OutText << "\t";
+					for (auto i = 0; i < size(Pat.ColorIndices); ++i) {
+						uint8_t Plane = 0;
+						for (auto j = 0; j < size(Pat.ColorIndices[i]); ++j) {
+							const auto ColorIndex = Pat.ColorIndices[i][j] + 1; //!< 先頭の透明色を考慮して + 1
+							const auto Shift = 7 - j;
+							const auto Mask = 1 << pl;
+							Plane |= ((ColorIndex & Mask) ? 1 : 0) << Shift;
+						}
+						OutText << "0x" << std::hex << std::setw(sizeof(Plane) << 1) << std::right << std::setfill('0') << static_cast<uint16_t>(Plane);
+						if (size(this->Patterns) - 1 > pat || 1 > pl || size(Pat.ColorIndices) - 1 > i) { OutText << ", "; }
+
+						OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
+					}
+				}
+				OutText << std::endl;
+			}
+			OutText << "};" << std::endl;
+
+			OutBin.close();
+			OutText.close();
+
+			return *this;
+		}
 	};
 
 	namespace BG
@@ -1177,6 +1244,8 @@ namespace FC {
 			virtual Converter& Create() override { Super::Create(); return *this; }
 			
 			virtual const Converter& OutputBAT(std::string_view Name) const override {
+				std::cout << "\tBAT size = " << size(this->Map[0]) << " x " << size(this->Map) << std::endl;
+
 				std::ofstream OutBin(data(std::string(Name) + ".bin"), std::ios::binary | std::ios::out);
 				assert(!OutBin.bad());
 				std::ofstream OutText(data(std::string(Name) + ".txt"), std::ios::out);
@@ -1220,7 +1289,7 @@ namespace FC {
 						assert(this->Patterns[LTLT].HasValidPaletteIndex());
 						const uint8_t BAT = (this->Patterns[RBLT].PaletteIndex << 6) | (this->Patterns[LBLT].PaletteIndex << 4) | (this->Patterns[RTLT].PaletteIndex << 2) | this->Patterns[LTLT].PaletteIndex;
 
-						OutText << "0x" << std::hex << std::setw(sizeof(BAT) << 1) << std::right << std::setfill('0') << BAT;
+						OutText << "0x" << std::hex << std::setw(sizeof(BAT) << 1) << std::right << std::setfill('0') << static_cast<uint16_t>(BAT);
 						if (size(this->Map) - 1 > i || size(this->Map[i]) - 1 > j) { OutText << ", "; }
 
 						OutBin.write(reinterpret_cast<const char*>(&BAT), sizeof(BAT));
@@ -1249,57 +1318,13 @@ namespace FC {
 			Converter(const cv::Mat& Img) : Super(Img) {}
 
 			virtual Converter& Create() override { Super::Create(); return *this; }
-
-			virtual const Converter& OutputPattern(std::string_view Name) const override {
-				std::cout << "\tPattern count = " << size(this->Patterns) << std::endl;
-				std::cout << "\tSprite size = " << static_cast<uint16_t>(W) << " x " << static_cast<uint16_t>(H) << std::endl;
-
-				std::ofstream OutBin(data(std::string(Name) + ".bin"), std::ios::binary | std::ios::out);
-				assert(!OutBin.bad());
-				std::ofstream OutText(data(std::string(Name) + ".txt"), std::ios::out);
-				assert(!OutText.bad());
-
-				//OutText << "const " << typeid(uint8_t).name() << " " << Name << "[] = {" << std::endl;
-				OutText << "const u" << (sizeof(uint8_t) << 3) << " " << Name << "[] = {" << std::endl;
-
-				for (auto pat = 0; pat < size(this->Patterns); ++pat) {
-					const auto& Pat = this->Patterns[pat];
-					assert(Pat.HasValidPaletteIndex());
-
-					//!< パターン毎のパレットインデックス情報を出力
-					std::cout << "\t\tPalette index = " << Pat.PaletteIndex << std::endl;
-
-					//!< 2 プレーン
-					for (auto pl = 0; pl < 2; ++pl) {
-						OutText << "\t";
-						for (auto i = 0; i < size(Pat.ColorIndices); ++i) {
-							uint8_t Plane = 0;
-							for (auto j = 0; j < size(Pat.ColorIndices[i]); ++j) {
-								const auto ColorIndex = Pat.ColorIndices[i][j] + 1; //!< 先頭の透明色を考慮して + 1
-								const auto Shift = 7 - j;
-								const auto Mask = 1 << pl;
-								Plane |= ((ColorIndex & Mask) ? 1 : 0) << Shift;
-							}
-							OutText << "0x" << std::hex << std::setw(sizeof(Plane) << 1) << std::right << std::setfill('0') << Plane;
-							if (size(this->Patterns) - 1 > pat || 1 > pl || size(Pat.ColorIndices) - 1 > i) { OutText << ", "; }
-
-							OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
-						}
-					}
-					OutText << std::endl;
-				}
-				OutText << "};" << std::endl;
-
-				OutBin.close();
-				OutText.close();
-
-				return *this;
-			}
 		};
 	}
 
 	class ResourceReader : public ResourceReaderBase
 	{
+	private:
+		using Super = ResourceReaderBase;
 	public:
 		virtual void ProcessPalette(std::string_view Name, std::string_view File) override {
 			if (!empty(File)) {
@@ -1339,7 +1364,7 @@ namespace FC {
 #pragma region GB
 /*
 * 画面		: 160 x 144
-* BG		: 256 x 256、パターン 8 x 8 x 128 種(+ 共用分が 128 種ある)、4 諧調モノクロ
+* BG		: 256 x 256(32 x 32 セル)、パターン 8 x 8 x 128 種(+ 共用分が 128 種ある)、4 諧調モノクロ
 * スプライト	: 40 枚、パターン 8 x 8 x 128 種(+ 共用分が 128 種ある)。4 諧調モノクロ
 */
 namespace GB
@@ -1394,6 +1419,94 @@ namespace GB
 			assert(size(this->Patterns) <= 256);
 			return *this;
 		}
+
+		virtual const ConverterBase& OutputPalette(std::string_view Name) const override {
+			std::cout << "\tPalette count = " << size(this->Palettes) << std::endl;
+			if (size(this->Palettes) > GetPaletteCount()) { std::cerr << "\tPalette Exceed" << std::endl; }
+
+			std::ofstream OutBin(data(std::string(Name) + ".bin"), std::ios::binary | std::ios::out);
+			assert(!OutBin.bad());
+			std::ofstream OutText(data(std::string(Name) + ".txt"), std::ios::out);
+			assert(!OutText.bad());
+
+			OutText << "const u" << (sizeof(uint8_t) << 3) << " " << Name << "[] = {" << std::endl;
+
+			for (auto i = 0; i < size(this->Palettes); ++i) {
+				std::cout << "\t\tPalette color count = " << size(this->Palettes[i]) << std::endl;
+
+				//!< 出力用の型へ変換
+				std::vector<uint8_t> PalOut;
+				{
+					std::ranges::copy(this->Palettes[i], std::back_inserter(PalOut));
+					for (auto j = size(PalOut); j < GetPaletteColorCount(); j++) {
+						PalOut.emplace_back(0);
+					}
+				}
+
+				//!< 出力
+				OutText << "\t";
+				uint8_t PalMask = 0;
+				for (auto j = 0; j < size(PalOut); ++j) {
+					PalMask |= static_cast<uint16_t>(PalOut[j]) << (j << 1);
+				}
+				OutText << "0x" << std::hex << std::setw(sizeof(PalMask) << 1) << std::right << std::setfill('0') << static_cast<uint16_t>(PalMask);
+				if (size(this->Palettes) - 1 > i) { OutText << ", "; }
+				OutText << std::endl;
+
+				OutBin.write(reinterpret_cast<const char*>(&PalMask), sizeof(PalMask));
+			}
+			OutText << "};" << std::endl;
+
+			OutBin.close();
+			OutText.close();
+
+			return *this;
+		}
+		virtual const ConverterBase& OutputPattern(std::string_view Name) const override {
+			std::cout << "\tPattern count = " << size(this->Patterns) << std::endl;
+			std::cout << "\tSprite size = " << static_cast<uint16_t>(W) << " x " << static_cast<uint16_t>(H) << std::endl;
+
+			std::ofstream OutBin(data(std::string(Name) + ".bin"), std::ios::binary | std::ios::out);
+			assert(!OutBin.bad());
+			std::ofstream OutText(data(std::string(Name) + ".txt"), std::ios::out);
+			assert(!OutText.bad());
+
+			//OutText << "const " << typeid(uint8_t).name() << " " << Name << "[] = {" << std::endl;
+			OutText << "const u" << (sizeof(uint8_t) << 3) << " " << Name << "[] = {" << std::endl;
+
+			for (auto pat = 0; pat < size(this->Patterns); ++pat) {
+				const auto& Pat = this->Patterns[pat];
+				assert(Pat.HasValidPaletteIndex());
+
+				//!< パターン毎のパレットインデックス情報を出力
+				std::cout << "\t\tPalette index = " << Pat.PaletteIndex << std::endl;
+
+				OutText << "\t";
+				for (auto i = 0; i < size(Pat.ColorIndices); ++i) {
+					//!< 2 プレーン (GB ではプレーンをまとめて出力ではなく、交互に出力)
+					for (auto pl = 0; pl < 2; ++pl) {
+						uint8_t Plane = 0;
+						for (auto j = 0; j < size(Pat.ColorIndices[i]); ++j) {
+							const auto ColorIndex = Pat.ColorIndices[i][j] + 1; //!< 先頭の透明色を考慮して + 1
+							const auto Shift = 7 - j;
+							const auto Mask = 1 << pl;
+							Plane |= ((ColorIndex & Mask) ? 1 : 0) << Shift;
+						}
+						OutText << "0x" << std::hex << std::setw(sizeof(Plane) << 1) << std::right << std::setfill('0') << static_cast<uint16_t>(Plane);
+						if (size(this->Patterns) - 1 > pat || 1 > pl || size(Pat.ColorIndices) - 1 > i) { OutText << ", "; }
+
+						OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
+					}
+				}
+				OutText << std::endl;
+			}
+			OutText << "};" << std::endl;
+
+			OutBin.close();
+			OutText.close();
+
+			return *this;
+		}
 	};
 	namespace BG 
 	{
@@ -1421,57 +1534,13 @@ namespace GB
 			virtual uint16_t GetPaletteCount() const override { return 2; };
 
 			virtual Converter& Create() override { Super::Create(); return *this; }
-
-			virtual const Converter& OutputPattern(std::string_view Name) const override {
-				std::cout << "\tPattern count = " << size(this->Patterns) << std::endl;
-				std::cout << "\tSprite size = " << static_cast<uint16_t>(W) << " x " << static_cast<uint16_t>(H) << std::endl;
-
-				std::ofstream OutBin(data(std::string(Name) + ".bin"), std::ios::binary | std::ios::out);
-				assert(!OutBin.bad());
-				std::ofstream OutText(data(std::string(Name) + ".txt"), std::ios::out);
-				assert(!OutText.bad());
-
-				//OutText << "const " << typeid(uint8_t).name() << " " << Name << "[] = {" << std::endl;
-				OutText << "const u" << (sizeof(uint8_t) << 3) << " " << Name << "[] = {" << std::endl;
-
-				for (auto pat = 0; pat < size(this->Patterns); ++pat) {
-					const auto& Pat = this->Patterns[pat];
-					assert(Pat.HasValidPaletteIndex());
-
-					//!< パターン毎のパレットインデックス情報を出力
-					std::cout << "\t\tPalette index = " << Pat.PaletteIndex << std::endl;
-
-					OutText << "\t";
-					for (auto i = 0; i < size(Pat.ColorIndices); ++i) {
-						//!< 2 プレーン (GB ではプレーンをまとめて出力ではなく、交互に出力)
-						for (auto pl = 0; pl < 2; ++pl) {
-							uint8_t Plane = 0;
-							for (auto j = 0; j < size(Pat.ColorIndices[i]); ++j) {
-								const auto ColorIndex = Pat.ColorIndices[i][j] + 1; //!< 先頭の透明色を考慮して + 1
-								const auto Shift = 7 - j;
-								const auto Mask = 1 << pl;
-								Plane |= ((ColorIndex & Mask) ? 1 : 0) << Shift;
-							}
-							OutText << "0x" << std::hex << std::setw(sizeof(Plane) << 1) << std::right << std::setfill('0') << Plane;
-							if (size(this->Patterns) - 1 > pat || 1 > pl || size(Pat.ColorIndices) - 1 > i) { OutText << ", "; }
-
-							OutBin.write(reinterpret_cast<const char*>(&Plane), sizeof(Plane));
-						}
-					}
-					OutText << std::endl;
-				}
-				OutText << "};" << std::endl;
-
-				OutBin.close();
-				OutText.close();
-
-				return *this;
-			}
 		};
 	}
 
 	class ResourceReader : public ResourceReaderBase
 	{
+	private:
+		using Super = ResourceReaderBase;
 	public:
 		virtual void ProcessPalette(std::string_view Name, std::string_view File) override {
 			if (!empty(File)) {
@@ -1520,6 +1589,8 @@ namespace GB
 int main(int argc, char* argv[])
 {
 	PCE::ResourceReader rr;
+	//FC::ResourceReader rr;
+	//GB::ResourceReader rr;
 	rr.Read(".");
 }
 
