@@ -127,6 +127,11 @@ public:
 	virtual uint16_t GetPaletteCount() const = 0;
 	virtual uint16_t GetPaletteColorCount() const = 0;
 
+	//!< パレットの先頭に予約色(透明色、背景色)を持つか
+	virtual bool HasPaletteReservedColor() const { return true; }
+	virtual uint16_t GetPaletteReservedColorCount() const { return HasPaletteReservedColor() ? 1 : 0; }
+	virtual uint16_t GetPaletteReservedColor() const { return 0x0000; }
+
 	virtual cv::Size GetMapSize(const uint8_t w, const uint8_t h) const { return cv::Size(Image.cols / w, Image.rows / h); }
 	virtual cv::Size GetMapSize() const { return GetMapSize(W, H); }
 
@@ -190,7 +195,7 @@ public:
 		for (const auto& p : ColorPatterns) {
 			auto& Pal = Palettes.emplace_back();
 			AddPatternColorToPalette(Pal, p);
-			if (size(Pal) > GetPaletteColorCount() - 1) { std::cerr << "Color Exceed " << size(Pal) << std::endl; }
+			if (size(Pal) > GetPaletteColorCount() - GetPaletteReservedColorCount()) { std::cerr << "Color Exceed " << size(Pal) << std::endl; }
 
 			std::ranges::sort(Pal);
 		}
@@ -206,7 +211,7 @@ public:
 				AddPatternColorToPalette(Pal, ColorPatterns[c.PatternIndex]);
 			}
 
-			if (size(Pal) > GetPaletteColorCount() - 1) { std::cerr << "Color Exceed " << size(Pal) << std::endl; }
+			if (size(Pal) > GetPaletteColorCount() - GetPaletteReservedColorCount()) { std::cerr << "Color Exceed " << size(Pal) << std::endl; }
 			std::ranges::sort(Pal);
 		}
 	}
@@ -223,7 +228,7 @@ public:
 				AddPatternColorToPalette(Pal, ColorPatterns[Map[i + 1][j + 0].PatternIndex]);
 				AddPatternColorToPalette(Pal, ColorPatterns[Map[i + 1][j + 1].PatternIndex]);
 
-				if (size(Pal) > GetPaletteColorCount() - 1) { std::cerr << "Color Exceed " << size(Pal) << std::endl; }
+				if (size(Pal) > GetPaletteColorCount() - GetPaletteReservedColorCount()) { std::cerr << "Color Exceed " << size(Pal) << std::endl; }
 				std::ranges::sort(Pal);
 			}
 		}
@@ -294,8 +299,8 @@ public:
 					if (!empty(lhs) && !empty(rhs)) {
 						std::vector<uint32_t> Union;
 						std::ranges::set_union(lhs, rhs, std::back_inserter(Union));
-						//!< パレットの和集合が GetPaletteColorCount() 色以下に収まる場合は、一つのパレットにまとめる事が可能
-						if (GetPaletteColorCount() > size(Union)) {
+						//!< パレットの和集合が パレット中のカラー数以下に収まる場合は、一つのパレットにまとめる事が可能
+						if (GetPaletteColorCount() - GetPaletteReservedColorCount() > size(Union)) {
 							lhs.assign(begin(Union), end(Union));
 							rhs.clear();
 							std::ranges::replace(PaletteIndices, j, i);
@@ -354,12 +359,15 @@ public:
 		for (auto i : Palettes) {
 			std::cout << "\t\tPalette color count = " << size(i) << std::endl;
 
-			const T TransparentColor = 0; //!< 先頭は透明色 (ここでは 0 としている)
+			const T TransparentColor = 0; //!< 先頭色 (ここでは 0 としている)
 
 			//!< 出力用の型へ変換
 			std::vector<T> PalOut;
 			{
-				PalOut.emplace_back(TransparentColor); //!< 透明色
+				//!< 透明色
+				if (HasPaletteReservedColor()) {
+					PalOut.emplace_back(TransparentColor); 
+				}
 				std::ranges::copy(i, std::back_inserter(PalOut));
 				//!< 空きも透明色で埋める
 				for (auto j = size(PalOut); j < GetPaletteColorCount(); j++) {
@@ -432,9 +440,10 @@ public:
 #pragma region RESTORE
 	virtual const Converter& RestorePalette() const {
 #ifdef _DEBUG
-		cv::Mat Res(cv::Size(GetPaletteColorCount() - 1, static_cast<int>(size(Palettes))), Image.type());
+		const auto Count = GetPaletteColorCount() - GetPaletteReservedColorCount();
+		cv::Mat Res(cv::Size(Count, static_cast<int>(size(Palettes))), Image.type());
 		for (auto i = 0; i < size(Palettes); ++i) {
-			for (auto j = 0; j < GetPaletteColorCount() - 1; ++j) {
+			for (auto j = 0; j < Count; ++j) {
 				Res.ptr<cv::Vec3b>(i)[j] = j < size(Palettes[i]) ? FromPlatformColor(Palettes[i][j]) : cv::Vec3b();
 			}
 		}
@@ -1434,12 +1443,17 @@ namespace GB
 			for (auto i = 0; i < size(this->Palettes); ++i) {
 				std::cout << "\t\tPalette color count = " << size(this->Palettes[i]) << std::endl;
 
+				const uint8_t TransparentColor = 0; //!< 先頭色 (ここでは 0 としている)
+
 				//!< 出力用の型へ変換
 				std::vector<uint8_t> PalOut;
 				{
+					if (this->HasPaletteReservedColor()) {
+						PalOut.emplace_back(TransparentColor);
+					}
 					std::ranges::copy(this->Palettes[i], std::back_inserter(PalOut));
 					for (auto j = size(PalOut); j < GetPaletteColorCount(); j++) {
-						PalOut.emplace_back(0);
+						PalOut.emplace_back(TransparentColor);
 					}
 				}
 
@@ -1517,6 +1531,9 @@ namespace GB
 			using Super = ConverterBase<W, H>;
 		public:
 			Converter(const cv::Mat& Img) : Super(Img) {}
+
+			//!< GB の BG パレットは先頭が背景色というわけではない
+			virtual bool HasPaletteReservedColor() const override { return false; }
 
 			virtual Converter& Create() override { Super::Create(); return *this; }
 		};
