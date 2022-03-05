@@ -1,0 +1,3 @@
+[submodule "ImageConverter"]
+	path = ImageConverter
+	url = https://github.com/horinoh/ImageConverter.git

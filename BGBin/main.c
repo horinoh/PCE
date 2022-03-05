@@ -2,10 +2,10 @@
 
 #include "..\define.h"
 
-#incbin(Palette, "PaletteBG.bin");
-#incbin(Pattern, "PatternBG.bin");
-#incbin(PatternPalette, "PatternBG.pal.bin");
-#incbin(Map, "MapBG.bin");
+#incbin(Palette, "res/PaletteBG.bin");
+#incbin(Pattern, "res/PatternBG.bin");
+#incbin(PatternPalette, "res/PatternBG.pal.bin");
+#incbin(Map, "res/MapBG.bin");
 
 #define MAP_TILE_W 32
 #define MAP_TILE_H 16
