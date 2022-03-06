@@ -9,6 +9,11 @@
             "command": "huc main.c"
         },
         {
+            "label": "Convert",
+            "type": "shell",
+            "command": "./Convert.bat"
+        },
+        {
             "label": "Execute PCE",
             "type": "shell",
             "command": "Ootake main.pce"
@@ -18,6 +23,7 @@
             "type": "shell",
             "dependsOrder": "sequence",
             "dependsOn": [
+                "Convert",
                 "Compile PCE",
                 "Execute PCE"
             ],
