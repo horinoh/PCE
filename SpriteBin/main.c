@@ -1,8 +1,8 @@
 #include "huc.h"
 #include "..\define.h"
 
-#incbin(Palette, "PaletteSPRITE.bin")
-#incbin(Pattern, "PatternSPRITE.bin")
+#incbin(Palette, "res/PaletteSPRITE.bin")
+#incbin(Pattern, "res/PatternSPRITE.bin")
 
 PutSpritesRandom()
 {
