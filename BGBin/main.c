@@ -2,10 +2,24 @@
 
 #include "..\define.h"
 
-#incbin(Palette, "res/PaletteBG.bin");
-#incbin(Pattern, "res/PatternBG.bin");
-#incbin(PatternPalette, "res/PatternBG.pal.bin");
-#incbin(Map, "res/MapBG.bin");
+#incbin(Palette, "res/BGTEST_PAL.bin");
+#incbin(Pattern, "res/BGTEST_PAT.bin");
+#incbin(PatternPalette, "res/BGTEST_PAT.pal.bin");
+#incbin(Map, "res/BGTEST_MAP.bin");
+#define BG_PAL_COUNT 1
+#define BG_PAT_COUNT 16
+#define BG_MAP_W 4
+#define BG_MAP_H 4
+/*
+#incbin(Palette, "res/bg_PAL.bin");
+#incbin(Pattern, "res/bg_PAT.bin");
+#incbin(PatternPalette, "res/bg_PAT.pal.bin");
+#incbin(Map, "res/bg_MAP.bin");
+#define BG_PAL_COUNT 1
+#define BG_PAT_COUNT 3
+#define BG_MAP_W 32
+#define BG_MAP_H 16
+*/
 
 #define MAP_TILE_W 32
 #define MAP_TILE_H 16
@@ -14,12 +28,6 @@
 #define SCR_TILE_H (SCREEN_HEIGHT>>4)
 
 #define TILE_VRAM 0x5000
-
-/* Set convert result here */
-#define BG_MAP_W 4
-#define BG_MAP_H 4
-#define BG_PAT_COUNT 16
-#define BG_PAL_COUNT 1
 
 main()
 {  
