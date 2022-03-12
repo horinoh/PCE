@@ -2,27 +2,16 @@
 
 #include "..\define.h"
 
-#incbin(Palette, "res/BGTEST_PAL.bin");
-#incbin(Pattern, "res/BGTEST_PAT.bin");
-#incbin(PatternPalette, "res/BGTEST_PAT.pal.bin");
-#incbin(Map, "res/BGTEST_MAP.bin");
-#define BG_PAL_COUNT 1
-#define BG_PAT_COUNT 16
-#define BG_MAP_W 4
-#define BG_MAP_H 4
-/*
-#incbin(Palette, "res/bg_PAL.bin");
-#incbin(Pattern, "res/bg_PAT.bin");
-#incbin(PatternPalette, "res/bg_PAT.pal.bin");
-#incbin(Map, "res/bg_MAP.bin");
-#define BG_PAL_COUNT 1
-#define BG_PAT_COUNT 3
+/* Convert data */
+#incbin(Palette, "res/32x16mapchip_20190721_PAL.bin");
+#incbin(Pattern, "res/32x16mapchip_20190721_PAT.bin");
+#incbin(PatternPalette, "res/32x16mapchip_20190721_PAT.pal.bin");
+#incbin(Map, "res/32x16mapchip_20190721_MAP.bin");
+#define BG_PAL_COUNT 4
+#define BG_PAT_COUNT 168
 #define BG_MAP_W 32
 #define BG_MAP_H 16
-*/
-
-#define MAP_TILE_W 32
-#define MAP_TILE_H 16
+/* Convert data */
 
 #define SCR_TILE_W (SCREEN_WIDTH>>4)
 #define SCR_TILE_H (SCREEN_HEIGHT>>4)
@@ -37,7 +26,6 @@ main()
   x = y = 0;
   MapX = MapY = 0;
 
-  /*set_map_data(Map, MAP_TILE_W, MAP_TILE_H);  */
   set_map_data(Map, BG_MAP_W, BG_MAP_H);  
   set_tile_data(Pattern, BG_PAT_COUNT, PatternPalette);
 
@@ -47,11 +35,16 @@ main()
 
   while(1) {
     KeyState = joy(JOY_PAD0);
+
     if(KeyState & JOY_UP) { y = (y - 1) & 0xff; }
+    /*
+    if(KeyState & JOY_RGHT) { ++x; }
+    if(KeyState & JOY_LEFT) { --x; }
+    */
 
     if(!(y & 15)) {
       --MapY;
-      if(MapY < 0) { MapY += MAP_TILE_H; }
+      if(MapY < 0) { MapY += BG_MAP_H; }
       load_map(x >> 4, (y >> 4) - 1, MapX, MapY - 1, SCR_TILE_W, 1);
     }
 

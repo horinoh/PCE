@@ -1,20 +1,30 @@
 #include "huc.h"
 #include "..\define.h"
 
+/* Convert data */
+/*
 #incbin(Palette, "res/bomber_PAL.bin")
 #incbin(Pattern, "res/bomber_PAT.bin")
 #include "res\bomber_PAT.pal.txt"
-#define GET_SPR_PAL bomber_PAT
+#define GET_SPR_PAL bomber_PAT_PAL
 #define SPR_PAL_COUNT 1
 #define SPR_PAT_COUNT 2
-/*
+*/
 #incbin(Palette, "res/move_obj1_PAL.bin")
 #incbin(Pattern, "res/move_obj1_PAT.bin")
 #include "res\move_obj1_PAT.pal.txt"
-#define GET_SPR_PAL move_obj1_PAT
+#define GET_SPR_PAL move_obj1_PAT_PAL
 #define SPR_PAL_COUNT 12
 #define SPR_PAT_COUNT 24
+/*
+#incbin(Palette, "res/goblin_PAL.bin")
+#incbin(Pattern, "res/goblin_PAT.bin")
+#include "res\goblin_PAT.pal.txt"
+#define GET_SPR_PAL goblin_PAT_PAL
+#define SPR_PAL_COUNT 1
+#define SPR_PAT_COUNT 12
 */
+/* Convert data */
 
 PutSpritesRandom()
 {

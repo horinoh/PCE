@@ -1,4 +1,4 @@
-const u8 bomber_PAT[] = {
+const u8 bomber_PAT_PAL[] = {
 	0x00, 
 	0x00
 };
