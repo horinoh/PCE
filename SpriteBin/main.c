@@ -1,8 +1,20 @@
 #include "huc.h"
 #include "..\define.h"
 
-#incbin(Palette, "res/PaletteSPRITE.bin")
-#incbin(Pattern, "res/PatternSPRITE.bin")
+#incbin(Palette, "res/bomber_PAL.bin")
+#incbin(Pattern, "res/bomber_PAT.bin")
+#include "res\bomber_PAT.pal.txt"
+#define GET_SPR_PAL bomber_PAT
+#define SPR_PAL_COUNT 1
+#define SPR_PAT_COUNT 2
+/*
+#incbin(Palette, "res/move_obj1_PAL.bin")
+#incbin(Pattern, "res/move_obj1_PAT.bin")
+#include "res\move_obj1_PAT.pal.txt"
+#define GET_SPR_PAL move_obj1_PAT
+#define SPR_PAL_COUNT 12
+#define SPR_PAT_COUNT 24
+*/
 
 PutSpritesRandom()
 {
@@ -16,25 +28,23 @@ PutSpritesRandom()
 
 #define SPR_VRAM 0x6000
 
-/* Set convert result here */
-#define SPR_PAL_COUNT 1
-#define SPR_PAT_COUNT 14
-
 main()
 {
   u8 KeyState;
   u8 i;
-  
+  u8 SpId;
+
   load_vram(SPR_VRAM, Pattern, SPR_WORDSIZE_16x16 * SPR_PAT_COUNT);
   set_sprpal(0, Palette, SPR_PAL_COUNT);
 
   init_satb();
 
   for(i = 0;i < SPR_MAX;++i) {
+    SpId = i % SPR_PAT_COUNT;
     spr_set(i);
     spr_ctrl(SIZE_MAS | FLIP_MAS, SZ_16x16 | NO_FLIP);
-    spr_pattern(SPR_VRAM + (SPR_SIZE_16x16 / 16) * (i % SPR_PAT_COUNT));
-    spr_pal(0);
+    spr_pattern(SPR_VRAM + (SPR_SIZE_16x16 / 16) * SpId);
+    spr_pal(GET_SPR_PAL[SpId]);
     spr_pri(1);
   }
 
