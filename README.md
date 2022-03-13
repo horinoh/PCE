@@ -55,6 +55,10 @@
     ~~~
  - ターミナル - タスクの実行 - 上記で作成したタスク名("Compile PCE"等)を選択して実行
 
+## 素材
+
+- [ぴぽや倉庫](https://pipoya.net/sozai/)さんのフリー素材を使用させてもらっています
+
 <!--
 ## コンバートツール
 ### [OpenCV](https://sourceforge.net/projects/opencvlibrary/)
