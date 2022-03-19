@@ -11,7 +11,8 @@
         {
             "label": "Convert",
             "type": "shell",
-            "command": "./Convert.bat"
+            "command": "..\\ImageConverter\\x64\\Debug\\ImageConverter.exe PCE .\\res",
+            //"command": "..\\ImageConverter\\x64\\Release\\ImageConverter.exe PCE .\\res",
         },
         {
             "label": "Execute PCE",
@@ -23,9 +24,18 @@
             "type": "shell",
             "dependsOrder": "sequence",
             "dependsOn": [
-                "Convert",
                 "Compile PCE",
                 "Execute PCE"
+            ],
+            "problemMatcher": []
+        }
+        {
+            "label": "Convert, compile and execute PCE",
+            "type": "shell",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Convert",
+                "Compile and execute PCE",
             ],
             "problemMatcher": []
         }
